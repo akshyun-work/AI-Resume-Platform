@@ -1,8 +1,8 @@
-﻿namespace FaceRecognitionAPI.Models.DTOs
+namespace FaceRecognitionAPI.Models.DTOs
 {
     public class FaceRegistrationRequest
     {
-        public int User_ID { get; set; }
+        public int UserId { get; set; }
         public IFormFile Image { get; set; } = null!;
     }
 }
