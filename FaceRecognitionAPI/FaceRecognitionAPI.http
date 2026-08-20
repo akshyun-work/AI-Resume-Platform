@@ -1,0 +1,6 @@
+@FaceRecognitionAPI_HostAddress = http://localhost:5034
+
+GET {{FaceRecognitionAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
