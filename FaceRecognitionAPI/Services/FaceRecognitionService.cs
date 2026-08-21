@@ -1,24 +1,73 @@
-﻿using FaceRecognitionAPI.Models.DTOs;
+﻿using FaceRecognitionAPI.Data;
+using FaceRecognitionAPI.Models.DTOs;
+using FaceRecognitionAPI.Models.Entities;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
-namespace FaceRecognitionAPI.Services
+namespace FaceRecognitionAPI.Services;
+
+public class FaceRecognitionService
 {
-    public class FaceRecognitionService
+    private readonly PythonFaceService _pythonFaceService;
+    private readonly ApplicationDbContext _context;
+
+    public FaceRecognitionService(
+        PythonFaceService pythonFaceService,
+        ApplicationDbContext context)
     {
-        private readonly PythonFaceService _pythonFaceService;
+        _pythonFaceService = pythonFaceService;
+        _context = context;
+    }
 
-        public FaceRecognitionService(PythonFaceService pythonFaceService)
+    public async Task RegisterFaceAsync(FaceRegistrationRequest request)
+    {
+        var embedding = await _pythonFaceService
+            .GenerateEmbeddingAsync(request.Image);
+
+        var existingRegistration = await _context.FaceEmbeddings
+            .AnyAsync(f => f.UserId == request.UserId);
+
+        if (existingRegistration)
         {
-            _pythonFaceService = pythonFaceService;
+            throw new InvalidOperationException(
+                "This user already has a registered face."
+            );
         }
 
-        public async Task<float[]> RegisterFaceAsync(FaceRegistrationRequest request)
+        var matchingUserId = await FindMatchingUserIdAsync(embedding);
+
+        if (matchingUserId != 0)
         {
-            return await _pythonFaceService.GenerateEmbeddingAsync(request.Image);
+            throw new InvalidOperationException(
+                "This face is already linked to another account."
+            );
         }
 
-        public async Task<float[]?> LoginWithFaceAsync(FaceLoginRequest request)
+        var faceEmbedding = new FaceEmbedding
         {
-            return await _pythonFaceService.GenerateEmbeddingAsync(request.Image);
+            UserId = request.UserId,
+            Embedding = JsonSerializer.Serialize(embedding)
+        };
+
+        _context.FaceEmbeddings.Add(faceEmbedding);
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<int> LoginWithFaceAsync(FaceLoginRequest request)
+    {
+        var embedding = await _pythonFaceService
+            .GenerateEmbeddingAsync(request.Image);
+
+        var matchingUserId = await FindMatchingUserIdAsync(embedding);
+
+        if (matchingUserId == 0)
+        {
+            throw new InvalidOperationException(
+                "No matching face was found."
+            );
         }
+
+        return matchingUserId;
     }
 }

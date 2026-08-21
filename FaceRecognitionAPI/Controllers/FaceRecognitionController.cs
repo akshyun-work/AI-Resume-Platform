@@ -20,34 +20,46 @@ namespace FaceRecognitionAPI.Controllers
         public async Task<IActionResult> Register(
             [FromForm] FaceRegistrationRequest request)
         {
-            await _faceRecognitionService.RegisterFaceAsync(request);
-
-            return Ok(new
+            try
             {
-                message = "Face registered successfully."
-            });
+                await _faceRecognitionService.RegisterFaceAsync(request);
+
+                return Ok(new
+                {
+                    message = "Face registered successfully."
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login(
             [FromForm] FaceLoginRequest request)
         {
-            var username =
-                await _faceRecognitionService.LoginWithFaceAsync(request);
-
-            if (username is null)
+            try
             {
-                return Unauthorized(new
+                var userId = await _faceRecognitionService
+                    .LoginWithFaceAsync(request);
+
+                return Ok(new
                 {
-                    message = "Face not recognized."
+                    message = "Face verified successfully.",
+                    userId
                 });
             }
-
-            return Ok(new
+            catch (InvalidOperationException ex)
             {
-                message = "Login successful.",
-                username
-            });
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
         }
     }
 }
