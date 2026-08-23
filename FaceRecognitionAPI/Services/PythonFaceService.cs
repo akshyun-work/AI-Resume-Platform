@@ -1,4 +1,7 @@
 ﻿using System.Net.Http.Headers;
+using System.Threading;
+using FaceRecognitionAPI.Models.DTOs;
+using FaceRecognitionAPI.Models.Entities;
 
 namespace FaceRecognitionAPI.Services
 {
@@ -9,6 +12,87 @@ namespace FaceRecognitionAPI.Services
         public PythonFaceService(HttpClient httpClient)
         {
             _httpClient = httpClient;
+        }
+
+        public async Task<List<int>> SearchCandidatesAsync(
+            float[] embedding,
+            CancellationToken cancellationToken = default)
+        {
+            var payload = new
+            {
+                embedding
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(
+                "/search-candidates",
+                payload,
+                cancellationToken
+            );
+
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content
+                .ReadFromJsonAsync<AnnSearchResponse>();
+
+            return result?.UserIds ?? new List<int>();
+        }
+
+        public async Task RebuildIndexAsync(
+            List<int> userIds,
+            List<float[]> embeddings,
+            CancellationToken cancellationToken = default)
+        {
+            var payload = new
+            {
+                user_ids = userIds,
+                embeddings = embeddings
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(
+                "/rebuild-index",
+                payload,
+                cancellationToken
+            );
+
+            response.EnsureSuccessStatusCode();
+        }
+
+        public async Task AddEmbeddingToIndexAsync(
+            int userId,
+            float[] embedding,
+            CancellationToken cancellationToken = default)
+        {
+            var payload = new
+            {
+                user_id = userId,
+                embedding
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(
+                "/add-embedding",
+                payload,
+                cancellationToken
+            );
+
+            response.EnsureSuccessStatusCode();
+        }
+
+        public async Task<int> GetIndexCountAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _httpClient.GetAsync(
+                "/index-status",
+                cancellationToken
+            );
+
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content
+                .ReadFromJsonAsync<IndexStatusResponse>(
+                    cancellationToken: cancellationToken
+                );
+
+            return result?.TotalEmbeddings ?? 0;
         }
 
         public async Task<float[]> GenerateEmbeddingAsync(

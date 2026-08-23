@@ -3,6 +3,11 @@ from facenet_pytorch import MTCNN, InceptionResnetV1
 from PIL import Image
 import torch
 import io
+import os
+import json
+import faiss
+import numpy as np
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -19,6 +24,51 @@ resnet = InceptionResnetV1(
     pretrained="vggface2"
 ).eval().to(device)
 
+
+INDEX_DIRECTORY = "face_index"
+INDEX_PATH = os.path.join(INDEX_DIRECTORY, "faces.index")
+USER_IDS_PATH = os.path.join(INDEX_DIRECTORY, "user_ids.json")
+
+EMBEDDING_DIMENSION = 512
+HNSW_M = 32
+
+os.makedirs(INDEX_DIRECTORY, exist_ok=True)
+
+
+def create_index():
+    index = faiss.IndexHNSWFlat(EMBEDDING_DIMENSION, HNSW_M)
+
+    # Better search accuracy.
+    index.hnsw.efSearch = 64
+
+    return index
+
+def save_index():
+    faiss.write_index(index, INDEX_PATH)
+
+    with open(USER_IDS_PATH, "w") as file:
+        json.dump(user_ids, file)
+
+if os.path.exists(INDEX_PATH) and os.path.exists(USER_IDS_PATH):
+    index = faiss.read_index(INDEX_PATH)
+
+    with open(USER_IDS_PATH, "r") as file:
+        user_ids = json.load(file)
+else:
+    index = create_index()
+    user_ids = []
+
+class AnnSearchRequest(BaseModel):
+    embedding: list[float]
+
+
+class AddEmbeddingRequest(BaseModel):
+    user_id: int
+    embedding: list[float]
+
+class RebuildIndexRequest(BaseModel):
+    embeddings: list[list[float]]
+    user_ids: list[int]
 
 @app.post("/generate-embedding")
 async def generate_embedding(image: UploadFile = File(...)):
@@ -65,4 +115,119 @@ async def generate_embedding(image: UploadFile = File(...)):
 
     return {
         "embedding": embedding.tolist()
+    }
+
+@app.get("/index-status")
+async def index_status():
+    return {
+        "total_embeddings": index.ntotal
+    }
+
+@app.post("/add-embedding")
+async def add_embedding(request: AddEmbeddingRequest):
+    embedding = np.array(
+        [request.embedding],
+        dtype=np.float32
+    )
+
+    if request.user_id in user_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="This user already exists in the ANN index."
+        )
+
+    if embedding.shape[1] != EMBEDDING_DIMENSION:
+        raise HTTPException(
+            status_code=400,
+            detail="Embedding must have 512 dimensions."
+        )
+
+    faiss.normalize_L2(embedding)
+
+    index.add(embedding)
+    user_ids.append(request.user_id)
+
+    save_index()
+
+    return {
+        "message": "Embedding added to ANN index."
+    }
+
+@app.post("/search-candidates")
+async def search_candidates(request: AnnSearchRequest):
+    if index.ntotal == 0:
+        return {"user_ids": []}
+
+    query = np.array(
+        [request.embedding],
+        dtype=np.float32
+    )
+
+    if query.shape[1] != EMBEDDING_DIMENSION:
+        raise HTTPException(
+            status_code=400,
+            detail="Embedding must have 512 dimensions."
+        )
+
+    faiss.normalize_L2(query)
+
+    k = min(5, index.ntotal)
+
+    distances, indices = index.search(query, k)
+
+    matching_user_ids = [
+        user_ids[i]
+        for i in indices[0]
+        if i != -1
+    ]
+
+    return {
+        "user_ids": matching_user_ids
+    }
+
+@app.post("/rebuild-index")
+async def rebuild_index(request: RebuildIndexRequest):
+    global index, user_ids
+
+    if len(request.embeddings) != len(request.user_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Embeddings and User IDs must have the same length."
+        )
+
+    # Create a completely fresh index.
+    index = create_index()
+    user_ids = []
+
+    # Empty database is valid.
+    if len(request.embeddings) == 0:
+        save_index()
+
+        return {
+            "message": "ANN index rebuilt successfully.",
+            "total_embeddings": 0
+        }
+
+    embeddings = np.array(
+        request.embeddings,
+        dtype=np.float32
+    )
+
+    if embeddings.ndim != 2 or embeddings.shape[1] != EMBEDDING_DIMENSION:
+        raise HTTPException(
+            status_code=400,
+            detail="All embeddings must have 512 dimensions."
+        )
+
+    faiss.normalize_L2(embeddings)
+
+    index.add(embeddings)
+
+    user_ids = request.user_ids.copy()
+
+    save_index()
+
+    return {
+        "message": "ANN index rebuilt successfully.",
+        "total_embeddings": index.ntotal
     }

@@ -19,6 +19,83 @@ public class FaceRecognitionService
         _context = context;
     }
 
+    private async Task<int> FindMatchingUserIdAsync(float[] embedding)
+    {
+        const double similarityThreshold = 0.75;
+
+        var candidateUserIds =
+            await _pythonFaceService.SearchCandidatesAsync(embedding);
+        Console.WriteLine(
+            $"Candidate IDs: {string.Join(", ", candidateUserIds)}"
+            );
+        if (candidateUserIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var candidateEmbeddings = await _context.FaceEmbeddings
+            .AsNoTracking()
+            .Where(f => candidateUserIds.Contains(f.UserId))
+            .ToListAsync();
+
+        int bestMatchingUserId = 0;
+        double highestSimilarity = double.MinValue;
+
+        foreach (var storedFace in candidateEmbeddings)
+        {
+            var storedEmbedding =
+                JsonSerializer.Deserialize<float[]>(storedFace.Embedding);
+
+            if (storedEmbedding == null ||
+                storedEmbedding.Length != embedding.Length)
+            {
+                continue;
+            }
+
+            double similarity =
+                CalculateCosineSimilarity(embedding, storedEmbedding);
+
+            Console.WriteLine(
+                $"Candidate UserId: {storedFace.UserId}, " +
+                $"Similarity: {similarity}"
+            );
+
+            if (similarity > highestSimilarity)
+            {
+                highestSimilarity = similarity;
+                bestMatchingUserId = storedFace.UserId;
+            }
+        }
+
+        return highestSimilarity >= similarityThreshold
+            ? bestMatchingUserId
+            : 0;
+    }
+
+    private static double CalculateCosineSimilarity(
+    float[] firstEmbedding,
+    float[] secondEmbedding)
+    {
+        double dotProduct = 0;
+        double firstMagnitude = 0;
+        double secondMagnitude = 0;
+
+        for (int i = 0; i < firstEmbedding.Length; i++)
+        {
+            dotProduct += firstEmbedding[i] * secondEmbedding[i];
+            firstMagnitude += firstEmbedding[i] * firstEmbedding[i];
+            secondMagnitude += secondEmbedding[i] * secondEmbedding[i];
+        }
+
+        if (firstMagnitude == 0 || secondMagnitude == 0)
+        {
+            return 0;
+        }
+
+        return dotProduct /
+               (Math.Sqrt(firstMagnitude) * Math.Sqrt(secondMagnitude));
+    }
+
     public async Task RegisterFaceAsync(FaceRegistrationRequest request)
     {
         var embedding = await _pythonFaceService
@@ -52,6 +129,12 @@ public class FaceRecognitionService
         _context.FaceEmbeddings.Add(faceEmbedding);
 
         await _context.SaveChangesAsync();
+
+        await _pythonFaceService.AddEmbeddingToIndexAsync
+        (
+            request.UserId,
+            embedding
+        );
     }
 
     public async Task<int> LoginWithFaceAsync(FaceLoginRequest request)

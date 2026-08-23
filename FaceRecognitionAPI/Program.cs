@@ -17,6 +17,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 builder.Services.AddScoped<FaceRecognitionService>();
 
+builder.Services.AddHostedService<FastApiHostedService>();
+
+builder.Services.AddHostedService<AnnIndexSyncHostedService>();
+
 builder.Services.AddHttpClient<PythonFaceService>(client =>
 {
     client.BaseAddress = new Uri("http://localhost:8000");
