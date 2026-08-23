@@ -285,11 +285,11 @@ if __name__ == "__main__":
 
     print("\n===== STRUCTURED RESUME =====")
 
-for section, content in resume.items():
-    print(f"\n{section.upper()}:")
+    for section, content in resume.items():
+        print(f"\n{section.upper()}:")
 
-    if isinstance(content, list):
-        for item in content:
-            print(f"- {item}")
-    else:
-        print(content)
+        if isinstance(content, list):
+            for item in content:
+                print(f"- {item}")
+            else:
+                print(content)
