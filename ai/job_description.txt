@@ -1,0 +1,23 @@
+Java Backend Developer
+
+We are looking for a Java Backend Developer to join our engineering team.
+
+Requirements:
+- Strong knowledge of Java
+- Experience with Spring Boot
+- Good understanding of SQL
+- Experience building REST APIs
+- Knowledge of Git
+- Knowledge of Docker
+- Understanding of Data Structures and Algorithms
+
+Preferred:
+- Microservices
+- AWS
+- MongoDB
+
+Responsibilities:
+- Develop backend applications using Java and Spring Boot.
+- Design and maintain REST APIs.
+- Work with SQL databases.
+- Collaborate with other developers.
