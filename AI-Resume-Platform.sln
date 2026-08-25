@@ -7,6 +7,16 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FaceRecognitionAPI", "FaceR
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "FaceRecognitionService", "FaceRecognitionService\FaceRecognitionService.pyproj", "{85F14FD7-CEC6-4AD1-A9C1-527AFBA433FA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend", "backend", "{DC6BD8DD-8ED1-4769-A356-8F8DBA57910D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8619E48A-F95B-45DE-A806-16C9F349483E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ResumeAnalysis.Api", "backend\src\ResumeAnalysis.Api\ResumeAnalysis.Api.csproj", "{740A3A24-5219-4644-AF01-A0B6F92B6EDE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{7E11AEAE-2B27-4A54-9C74-1C771B5360CB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ResumeAnalysis.Tests", "backend\tests\ResumeAnalysis.Tests\ResumeAnalysis.Tests.csproj", "{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -19,11 +29,25 @@ Global
 		{EAEA0AC2-EEB4-42BF-B166-DDF17BC01F56}.Release|Any CPU.Build.0 = Release|Any CPU
 		{85F14FD7-CEC6-4AD1-A9C1-527AFBA433FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{85F14FD7-CEC6-4AD1-A9C1-527AFBA433FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{740A3A24-5219-4644-AF01-A0B6F92B6EDE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{740A3A24-5219-4644-AF01-A0B6F92B6EDE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{740A3A24-5219-4644-AF01-A0B6F92B6EDE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{740A3A24-5219-4644-AF01-A0B6F92B6EDE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {6B366E4D-D948-4579-A5A1-4F5EED748033}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{8619E48A-F95B-45DE-A806-16C9F349483E} = {DC6BD8DD-8ED1-4769-A356-8F8DBA57910D}
+		{740A3A24-5219-4644-AF01-A0B6F92B6EDE} = {8619E48A-F95B-45DE-A806-16C9F349483E}
+		{7E11AEAE-2B27-4A54-9C74-1C771B5360CB} = {DC6BD8DD-8ED1-4769-A356-8F8DBA57910D}
+		{F536C5B3-A0A9-4508-B47D-E2436DCDE6BE} = {7E11AEAE-2B27-4A54-9C74-1C771B5360CB}
 	EndGlobalSection
 EndGlobal
