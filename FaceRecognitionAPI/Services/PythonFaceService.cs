@@ -1,7 +1,5 @@
 ﻿using System.Net.Http.Headers;
-using System.Threading;
 using FaceRecognitionAPI.Models.DTOs;
-using FaceRecognitionAPI.Models.Entities;
 
 namespace FaceRecognitionAPI.Services
 {
@@ -14,7 +12,7 @@ namespace FaceRecognitionAPI.Services
             _httpClient = httpClient;
         }
 
-        public async Task<List<int>> SearchCandidatesAsync(
+        public async Task<List<Guid>> SearchCandidatesAsync(
             float[] embedding,
             CancellationToken cancellationToken = default)
         {
@@ -26,53 +24,51 @@ namespace FaceRecognitionAPI.Services
             var response = await _httpClient.PostAsJsonAsync(
                 "/search-candidates",
                 payload,
-                cancellationToken
-            );
+                cancellationToken);
 
             response.EnsureSuccessStatusCode();
 
-            var result = await response.Content
-                .ReadFromJsonAsync<AnnSearchResponse>();
+            var result =
+                await response.Content.ReadFromJsonAsync<AnnSearchResponse>(
+                    cancellationToken: cancellationToken);
 
-            return result?.UserIds ?? new List<int>();
+            return result?.CandidateIds ?? new List<Guid>();
         }
 
         public async Task RebuildIndexAsync(
-            List<int> userIds,
+            List<Guid> candidateIds,
             List<float[]> embeddings,
             CancellationToken cancellationToken = default)
         {
             var payload = new
             {
-                user_ids = userIds,
-                embeddings = embeddings
+                candidate_ids = candidateIds,
+                embeddings
             };
 
             var response = await _httpClient.PostAsJsonAsync(
                 "/rebuild-index",
                 payload,
-                cancellationToken
-            );
+                cancellationToken);
 
             response.EnsureSuccessStatusCode();
         }
 
         public async Task AddEmbeddingToIndexAsync(
-            int userId,
+            Guid candidateId,
             float[] embedding,
             CancellationToken cancellationToken = default)
         {
             var payload = new
             {
-                user_id = userId,
+                candidate_id = candidateId,
                 embedding
             };
 
             var response = await _httpClient.PostAsJsonAsync(
                 "/add-embedding",
                 payload,
-                cancellationToken
-            );
+                cancellationToken);
 
             response.EnsureSuccessStatusCode();
         }
@@ -82,15 +78,13 @@ namespace FaceRecognitionAPI.Services
         {
             var response = await _httpClient.GetAsync(
                 "/index-status",
-                cancellationToken
-            );
+                cancellationToken);
 
             response.EnsureSuccessStatusCode();
 
-            var result = await response.Content
-                .ReadFromJsonAsync<IndexStatusResponse>(
-                    cancellationToken: cancellationToken
-                );
+            var result =
+                await response.Content.ReadFromJsonAsync<IndexStatusResponse>(
+                    cancellationToken: cancellationToken);
 
             return result?.TotalEmbeddings ?? 0;
         }
@@ -102,7 +96,6 @@ namespace FaceRecognitionAPI.Services
             using var content = new MultipartFormDataContent();
 
             using var stream = image.OpenReadStream();
-
             using var fileContent = new StreamContent(stream);
 
             fileContent.Headers.ContentType =
@@ -122,10 +115,11 @@ namespace FaceRecognitionAPI.Services
             response.EnsureSuccessStatusCode();
 
             var result =
-                await response.Content.ReadFromJsonAsync<
-                    EmbeddingResponse>(cancellationToken: cancellationToken);
+                await response.Content.ReadFromJsonAsync<EmbeddingResponse>(
+                    cancellationToken: cancellationToken);
 
-            if (result?.Embedding is null || result.Embedding.Length == 0)
+            if (result?.Embedding is null ||
+                result.Embedding.Length == 0)
             {
                 throw new InvalidOperationException(
                     "The face processing service did not return a valid embedding.");
@@ -136,7 +130,8 @@ namespace FaceRecognitionAPI.Services
 
         private class EmbeddingResponse
         {
-            public float[] Embedding { get; set; } = Array.Empty<float>();
+            public float[] Embedding { get; set; } =
+                Array.Empty<float>();
         }
     }
 }

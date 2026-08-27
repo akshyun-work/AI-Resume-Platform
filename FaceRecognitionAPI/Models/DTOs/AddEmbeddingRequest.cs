@@ -2,7 +2,9 @@
 {
     public class AddEmbeddingRequest
     {
-        public int UserId { get; set; }
-        public float[] Embedding { get; set; } = Array.Empty<float>();
+        public Guid CandidateId { get; set; }
+
+        public List<float> Embedding { get; set; } =
+            new();
     }
 }

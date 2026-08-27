@@ -2,7 +2,8 @@ namespace FaceRecognitionAPI.Models.DTOs
 {
     public class FaceRegistrationRequest
     {
-        public int UserId { get; set; }
+        public Guid CandidateId { get; set; }
+
         public IFormFile Image { get; set; } = null!;
     }
 }

@@ -40,8 +40,8 @@ namespace FaceRecognitionAPI.Services
                 return;
             }
 
-            var userIds = faceEmbeddings
-                .Select(f => f.UserId)
+            var candidateIds = faceEmbeddings
+                .Select(f => f.CandidateId)
                 .ToList();
 
             var embeddings = faceEmbeddings
@@ -50,12 +50,12 @@ namespace FaceRecognitionAPI.Services
                         f.Embedding
                     )
                     ?? throw new InvalidOperationException(
-                        $"Invalid embedding for UserId {f.UserId}.")
+                        $"Invalid embedding for CandidateId {f.CandidateId}.")
                 )
                 .ToList();
 
             await _pythonFaceService.RebuildIndexAsync(
-                userIds,
+                candidateIds,
                 embeddings,
                 cancellationToken);
         }

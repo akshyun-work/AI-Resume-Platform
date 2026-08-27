@@ -1,10 +1,15 @@
+using ResumeAnalysis.Api.Entities;
+
 namespace FaceRecognitionAPI.Models.Entities
 {
     public class FaceEmbedding
     {
-        public int UserId { get; set; }
+        public Guid CandidateId { get; set; }
+
         public string Embedding { get; set; } = string.Empty;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public User User { get; set; } = null!;
+
+        public Candidate Candidate { get; set; } = null!;
     }
 }

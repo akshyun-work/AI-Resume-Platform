@@ -1,103 +1,344 @@
 import React from 'react';
-import { Award, Briefcase, Code, GraduationCap, Mail, CheckCircle2, AlertTriangle } from 'lucide-react';
+import {
+    Award,
+    Code,
+    GraduationCap,
+    Mail,
+    CheckCircle2,
+    AlertTriangle,
+    Search,
+    AlertCircle,
+    Lightbulb,
+    ArrowLeft,
+} from 'lucide-react';
 
-interface ScoreBreakdownProps {
-  score: number;
-  breakdown: {
-    contact_information: number;
-    resume_sections: number;
-    technical_skills: number;
-    projects: number;
-    experience: number;
-    certifications: number;
-    achievements: number;
-  };
-  skills: string[];
-  name?: string | null;
-  email?: string | null;
-  phone?: string | null;
+interface ATSScorecardProps {
+    score: number;
+    breakdown?: Record<string, number> | null;
+    skills: string[];
+    keywords: string[];
+    missingKeywords: string[];
+    missingSkills: string[];
+    issues: string[];
+    recommendations: string[];
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    analyzedAt?: string;
+    onBack: () => void;
 }
 
-export const ATSScorecard: React.FC<ScoreBreakdownProps> = ({ score, breakdown, skills, name, email, phone }) => {
-  const getScoreColor = (val: number) => {
-    if (val >= 80) return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
-    if (val >= 60) return 'text-amber-400 border-amber-500/30 bg-amber-500/10';
-    return 'text-rose-400 border-rose-500/30 bg-rose-500/10';
-  };
-
-  return (
-    <div className="space-y-6 w-full max-w-4xl">
-      {/* Candidate Profile Bar */}
-      <div className="bg-gray-900 border border-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center gap-4">
-        <div>
-          <span className="text-xs uppercase text-slate-400 tracking-wider">Candidate</span>
-          <h3 className="text-lg font-bold text-white">{name || 'Unnamed Candidate'}</h3>
-        </div>
-        <div className="flex gap-4 text-xs text-slate-300">
-          <span className="flex items-center gap-1.5"><Mail size={14} className="text-indigo-400"/> {email || 'Missing'}</span>
-          <span className="flex items-center gap-1.5"><Mail size={14} className="text-indigo-400"/> {phone || 'Missing'}</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Score Radial */}
-        <div className="bg-gray-900 border border-slate-800 p-6 rounded-2xl flex flex-col items-center justify-center text-center">
-          <div className={`w-36 h-36 rounded-full border-4 flex flex-col items-center justify-center ${getScoreColor(score)}`}>
-            <span className="text-4xl font-extrabold">{score}</span>
-            <span className="text-xs uppercase tracking-wider font-semibold opacity-80">/ 100 ATS</span>
-          </div>
-          <h4 className="text-base font-semibold text-white mt-4 flex items-center gap-1.5">
-            {score >= 80 ? <CheckCircle2 className="text-emerald-400" size={18}/> : <AlertTriangle className="text-amber-400" size={18}/>}
-            {score >= 80 ? 'ATS Optimized' : score >= 60 ? 'Needs Improvement' : 'High Rejection Risk'}
-          </h4>
-        </div>
-
-        {/* Categories */}
-        <div className="lg:col-span-2 bg-gray-900 border border-slate-800 p-6 rounded-2xl space-y-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-            100-Point Algorithmic Evaluation
-          </h4>
-          {[
-            { label: 'Technical Skills Matrix', val: breakdown.technical_skills, max: 25, icon: Code },
-            { label: 'Essential Sections Found', val: breakdown.resume_sections, max: 15, icon: GraduationCap },
-            { label: 'Projects Evaluation', val: breakdown.projects, max: 15, icon: Briefcase },
-            { label: 'Professional Experience', val: breakdown.experience, max: 15, icon: Briefcase },
-            { label: 'Contact Information Verified', val: breakdown.contact_information, max: 10, icon: Mail },
-            { label: 'Certifications & Courses', val: breakdown.certifications, max: 10, icon: Award },
-            { label: 'Achievements / Extracurricular', val: breakdown.achievements, max: 10, icon: Award },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <item.icon size={15} className="text-slate-400 shrink-0" />
-              <div className="flex-1">
-                <div className="flex justify-between text-xs font-medium mb-1">
-                  <span className="text-slate-300">{item.label}</span>
-                  <span className="text-slate-400">{item.val} / {item.max}</span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 rounded-full"
-                    style={{ width: `${(item.val / item.max) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Skills Pill Cloud */}
-      <div className="bg-gray-900 border border-slate-800 p-6 rounded-2xl">
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-          Extracted Skills Dictionary Matches ({skills.length})
-        </h4>
-        <div className="flex flex-wrap gap-2">
-          {skills.map((skill, index) => (
-            <span key={index} className="px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 text-indigo-300 border border-slate-700">
-              {skill}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+const getScoreLabel = (score: number) => {
+    if (score >= 80) return 'ATS Optimized';
+    if (score >= 60) return 'Needs Improvement';
+    return 'High Rejection Risk';
 };
+
+const getScoreClass = (score: number) => {
+    if (score >= 80) {
+        return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
+    }
+
+    if (score >= 60) {
+        return 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+    }
+
+    return 'text-rose-400 border-rose-500/30 bg-rose-500/10';
+};
+
+const formatLabel = (value: string) =>
+    value
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+
+export const ATSScorecard: React.FC<ATSScorecardProps> = ({
+    score,
+    breakdown,
+    skills,
+    keywords,
+    missingKeywords,
+    missingSkills,
+    issues,
+    recommendations,
+    name,
+    email,
+    phone,
+    analyzedAt,
+    onBack,
+}) => {
+    const categories = breakdown
+        ? Object.entries(breakdown)
+        : [];
+
+    return (
+        <div className="w-full max-w-5xl space-y-6">
+
+            {/* Back */}
+            <button
+                type="button"
+                onClick={onBack}
+                className="flex items-center gap-2 text-sm font-medium text-indigo-400 transition hover:text-indigo-300"
+            >
+                <ArrowLeft size={16} />
+                Back to Dashboard
+            </button>
+
+            {/* Candidate */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <p className="text-xs uppercase tracking-wider text-slate-500">
+                            Candidate
+                        </p>
+
+                        <h2 className="mt-1 text-xl font-bold text-white">
+                            {name || 'Candidate'}
+                        </h2>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+                        {email && (
+                            <span className="flex items-center gap-2">
+                                <Mail size={14} />
+                                {email}
+                            </span>
+                        )}
+
+                        {phone && (
+                            <span>
+                                {phone}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Score + Breakdown */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+
+                    <div
+                        className={`flex h-40 w-40 flex-col items-center justify-center rounded-full border-4 ${getScoreClass(score)}`}
+                    >
+                        <span className="text-5xl font-black">
+                            {score}
+                        </span>
+
+                        <span className="text-xs font-semibold uppercase tracking-wider opacity-70">
+                            / 100
+                        </span>
+                    </div>
+
+                    <h3 className="mt-5 flex items-center gap-2 font-semibold text-white">
+                        {score >= 80 ? (
+                            <CheckCircle2
+                                size={18}
+                                className="text-emerald-400"
+                            />
+                        ) : (
+                            <AlertTriangle
+                                size={18}
+                                className="text-amber-400"
+                            />
+                        )}
+
+                        {getScoreLabel(score)}
+                    </h3>
+
+                    {analyzedAt && (
+                        <p className="mt-2 text-xs text-slate-500">
+                            Analyzed{' '}
+                            {new Date(analyzedAt).toLocaleString()}
+                        </p>
+                    )}
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6 lg:col-span-2">
+
+                    <div>
+                        <h3 className="text-sm font-semibold text-white">
+                            ATS Category Breakdown
+                        </h3>
+
+                        <p className="mt-1 text-xs text-slate-500">
+                            Scores returned by the AI analysis pipeline.
+                        </p>
+                    </div>
+
+                    {categories.length === 0 && (
+                        <p className="text-sm text-slate-500">
+                            No category breakdown was returned.
+                        </p>
+                    )}
+
+                    {categories.map(([category, value]) => (
+                        <div key={category}>
+
+                            <div className="mb-1 flex justify-between text-xs">
+                                <span className="text-slate-300">
+                                    {formatLabel(category)}
+                                </span>
+
+                                <span className="text-slate-500">
+                                    {value}
+                                </span>
+                            </div>
+
+                            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                                <div
+                                    className="h-full rounded-full bg-indigo-500 transition-all"
+                                    style={{
+                                        width: `${Math.min(
+                                            Math.max(value, 0),
+                                            100
+                                        )}%`,
+                                    }}
+                                />
+                            </div>
+
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Information */}
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+
+                <InfoPanel
+                    title="Skills Identified"
+                    icon={<Code size={17} />}
+                    items={skills}
+                    empty="No skills identified."
+                    pillClass="bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+                />
+
+                <InfoPanel
+                    title="Keywords Identified"
+                    icon={<Search size={17} />}
+                    items={keywords}
+                    empty="No keywords identified."
+                    pillClass="bg-slate-800 text-slate-300 border-slate-700"
+                />
+
+                <InfoPanel
+                    title="Missing Skills"
+                    icon={<GraduationCap size={17} />}
+                    items={missingSkills}
+                    empty="No missing skills reported."
+                    pillClass="bg-amber-500/10 text-amber-300 border-amber-500/20"
+                />
+
+                <InfoPanel
+                    title="Missing Keywords"
+                    icon={<Search size={17} />}
+                    items={missingKeywords}
+                    empty="No missing keywords reported."
+                    pillClass="bg-rose-500/10 text-rose-300 border-rose-500/20"
+                />
+
+            </div>
+
+            <ListPanel
+                title="Issues"
+                icon={<AlertCircle size={17} />}
+                items={issues}
+                empty="No issues reported."
+            />
+
+            <ListPanel
+                title="Recommendations"
+                icon={<Lightbulb size={17} />}
+                items={recommendations}
+                empty="No recommendations reported."
+            />
+
+        </div>
+    );
+};
+
+interface InfoPanelProps {
+    title: string;
+    icon: React.ReactNode;
+    items: string[];
+    empty: string;
+    pillClass: string;
+}
+
+const InfoPanel: React.FC<InfoPanelProps> = ({
+    title,
+    icon,
+    items,
+    empty,
+    pillClass,
+}) => (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+            {icon}
+            {title}
+        </h3>
+
+        {items.length === 0 ? (
+            <p className="mt-4 text-xs text-slate-500">
+                {empty}
+            </p>
+        ) : (
+            <div className="mt-4 flex flex-wrap gap-2">
+                {items.map((item, index) => (
+                    <span
+                        key={`${item}-${index}`}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${pillClass}`}
+                    >
+                        {item}
+                    </span>
+                ))}
+            </div>
+        )}
+
+    </div>
+);
+
+interface ListPanelProps {
+    title: string;
+    icon: React.ReactNode;
+    items: string[];
+    empty: string;
+}
+
+const ListPanel: React.FC<ListPanelProps> = ({
+    title,
+    icon,
+    items,
+    empty,
+}) => (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+            {icon}
+            {title}
+        </h3>
+
+        {items.length === 0 ? (
+            <p className="mt-4 text-xs text-slate-500">
+                {empty}
+            </p>
+        ) : (
+            <ul className="mt-4 space-y-3">
+                {items.map((item, index) => (
+                    <li
+                        key={`${item}-${index}`}
+                        className="flex gap-3 text-sm text-slate-300"
+                    >
+                        <span className="mt-1 shrink-0 text-indigo-400">
+                            •
+                        </span>
+
+                        <span>{item}</span>
+                    </li>
+                ))}
+            </ul>
+        )}
+
+    </div>
+);

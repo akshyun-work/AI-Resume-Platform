@@ -27,7 +27,10 @@ resnet = InceptionResnetV1(
 
 INDEX_DIRECTORY = "face_index"
 INDEX_PATH = os.path.join(INDEX_DIRECTORY, "faces.index")
-USER_IDS_PATH = os.path.join(INDEX_DIRECTORY, "user_ids.json")
+CANDIDATE_IDS_PATH = os.path.join(
+    INDEX_DIRECTORY,
+    "candidate_ids.json"
+)
 
 EMBEDDING_DIMENSION = 512
 HNSW_M = 32
@@ -36,43 +39,59 @@ os.makedirs(INDEX_DIRECTORY, exist_ok=True)
 
 
 def create_index():
-    index = faiss.IndexHNSWFlat(EMBEDDING_DIMENSION, HNSW_M)
+    index = faiss.IndexHNSWFlat(
+        EMBEDDING_DIMENSION,
+        HNSW_M
+    )
 
     # Better search accuracy.
     index.hnsw.efSearch = 64
 
     return index
 
+
 def save_index():
     faiss.write_index(index, INDEX_PATH)
 
-    with open(USER_IDS_PATH, "w") as file:
-        json.dump(user_ids, file)
+    with open(CANDIDATE_IDS_PATH, "w") as file:
+        json.dump(candidate_ids, file)
 
-if os.path.exists(INDEX_PATH) and os.path.exists(USER_IDS_PATH):
+
+if (
+    os.path.exists(INDEX_PATH)
+    and os.path.exists(CANDIDATE_IDS_PATH)
+):
     index = faiss.read_index(INDEX_PATH)
 
-    with open(USER_IDS_PATH, "r") as file:
-        user_ids = json.load(file)
+    with open(CANDIDATE_IDS_PATH, "r") as file:
+        candidate_ids = json.load(file)
 else:
     index = create_index()
-    user_ids = []
+    candidate_ids = []
+
 
 class AnnSearchRequest(BaseModel):
     embedding: list[float]
 
 
 class AddEmbeddingRequest(BaseModel):
-    user_id: int
+    candidate_id: str
     embedding: list[float]
+
 
 class RebuildIndexRequest(BaseModel):
     embeddings: list[list[float]]
-    user_ids: list[int]
+    candidate_ids: list[str]
+
 
 @app.post("/generate-embedding")
-async def generate_embedding(image: UploadFile = File(...)):
-    if not image.content_type or not image.content_type.startswith("image/"):
+async def generate_embedding(
+    image: UploadFile = File(...)
+):
+    if (
+        not image.content_type
+        or not image.content_type.startswith("image/")
+    ):
         raise HTTPException(
             status_code=400,
             detail="Uploaded file must be an image."
@@ -81,7 +100,9 @@ async def generate_embedding(image: UploadFile = File(...)):
     image_bytes = await image.read()
 
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGB")
     except Exception:
         raise HTTPException(
             status_code=400,
@@ -117,23 +138,27 @@ async def generate_embedding(image: UploadFile = File(...)):
         "embedding": embedding.tolist()
     }
 
+
 @app.get("/index-status")
 async def index_status():
     return {
         "total_embeddings": index.ntotal
     }
 
+
 @app.post("/add-embedding")
-async def add_embedding(request: AddEmbeddingRequest):
+async def add_embedding(
+    request: AddEmbeddingRequest
+):
     embedding = np.array(
         [request.embedding],
         dtype=np.float32
     )
 
-    if request.user_id in user_ids:
+    if request.candidate_id in candidate_ids:
         raise HTTPException(
             status_code=400,
-            detail="This user already exists in the ANN index."
+            detail="This candidate already exists in the ANN index."
         )
 
     if embedding.shape[1] != EMBEDDING_DIMENSION:
@@ -145,7 +170,7 @@ async def add_embedding(request: AddEmbeddingRequest):
     faiss.normalize_L2(embedding)
 
     index.add(embedding)
-    user_ids.append(request.user_id)
+    candidate_ids.append(request.candidate_id)
 
     save_index()
 
@@ -153,10 +178,15 @@ async def add_embedding(request: AddEmbeddingRequest):
         "message": "Embedding added to ANN index."
     }
 
+
 @app.post("/search-candidates")
-async def search_candidates(request: AnnSearchRequest):
+async def search_candidates(
+    request: AnnSearchRequest
+):
     if index.ntotal == 0:
-        return {"user_ids": []}
+        return {
+            "candidate_ids": []
+        }
 
     query = np.array(
         [request.embedding],
@@ -173,31 +203,39 @@ async def search_candidates(request: AnnSearchRequest):
 
     k = min(5, index.ntotal)
 
-    distances, indices = index.search(query, k)
+    distances, indices = index.search(
+        query,
+        k
+    )
 
-    matching_user_ids = [
-        user_ids[i]
+    matching_candidate_ids = [
+        candidate_ids[i]
         for i in indices[0]
         if i != -1
     ]
 
     return {
-        "user_ids": matching_user_ids
+        "candidate_ids": matching_candidate_ids
     }
 
-@app.post("/rebuild-index")
-async def rebuild_index(request: RebuildIndexRequest):
-    global index, user_ids
 
-    if len(request.embeddings) != len(request.user_ids):
+@app.post("/rebuild-index")
+async def rebuild_index(
+    request: RebuildIndexRequest
+):
+    global index, candidate_ids
+
+    if len(request.embeddings) != len(
+        request.candidate_ids
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Embeddings and User IDs must have the same length."
+            detail="Embeddings and Candidate IDs must have the same length."
         )
 
     # Create a completely fresh index.
     index = create_index()
-    user_ids = []
+    candidate_ids = []
 
     # Empty database is valid.
     if len(request.embeddings) == 0:
@@ -213,7 +251,10 @@ async def rebuild_index(request: RebuildIndexRequest):
         dtype=np.float32
     )
 
-    if embeddings.ndim != 2 or embeddings.shape[1] != EMBEDDING_DIMENSION:
+    if (
+        embeddings.ndim != 2
+        or embeddings.shape[1] != EMBEDDING_DIMENSION
+    ):
         raise HTTPException(
             status_code=400,
             detail="All embeddings must have 512 dimensions."
@@ -223,7 +264,7 @@ async def rebuild_index(request: RebuildIndexRequest):
 
     index.add(embeddings)
 
-    user_ids = request.user_ids.copy()
+    candidate_ids = request.candidate_ids.copy()
 
     save_index()
 

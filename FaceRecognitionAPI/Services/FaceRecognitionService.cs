@@ -1,8 +1,7 @@
-﻿using FaceRecognitionAPI.Data;
+﻿using System.Text.Json;
+using FaceRecognitionAPI.Data;
 using FaceRecognitionAPI.Models.DTOs;
-using FaceRecognitionAPI.Models.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace FaceRecognitionAPI.Services;
 
@@ -19,32 +18,37 @@ public class FaceRecognitionService
         _context = context;
     }
 
-    private async Task<int> FindMatchingUserIdAsync(float[] embedding)
+    private async Task<Guid> FindMatchingCandidateIdAsync(
+        float[] embedding)
     {
         const double similarityThreshold = 0.75;
 
-        var candidateUserIds =
-            await _pythonFaceService.SearchCandidatesAsync(embedding);
+        var candidateIds =
+            await _pythonFaceService.SearchCandidatesAsync(
+                embedding);
+
         Console.WriteLine(
-            $"Candidate IDs: {string.Join(", ", candidateUserIds)}"
-            );
-        if (candidateUserIds.Count == 0)
+            $"Candidate IDs: {string.Join(", ", candidateIds)}");
+
+        if (candidateIds.Count == 0)
         {
-            return 0;
+            return Guid.Empty;
         }
 
-        var candidateEmbeddings = await _context.FaceEmbeddings
-            .AsNoTracking()
-            .Where(f => candidateUserIds.Contains(f.UserId))
-            .ToListAsync();
+        var candidateEmbeddings =
+            await _context.FaceEmbeddings
+                .AsNoTracking()
+                .Where(f => candidateIds.Contains(f.CandidateId))
+                .ToListAsync();
 
-        int bestMatchingUserId = 0;
+        Guid bestMatchingCandidateId = Guid.Empty;
         double highestSimilarity = double.MinValue;
 
         foreach (var storedFace in candidateEmbeddings)
         {
             var storedEmbedding =
-                JsonSerializer.Deserialize<float[]>(storedFace.Embedding);
+                JsonSerializer.Deserialize<float[]>(
+                    storedFace.Embedding);
 
             if (storedEmbedding == null ||
                 storedEmbedding.Length != embedding.Length)
@@ -53,28 +57,30 @@ public class FaceRecognitionService
             }
 
             double similarity =
-                CalculateCosineSimilarity(embedding, storedEmbedding);
+                CalculateCosineSimilarity(
+                    embedding,
+                    storedEmbedding);
 
             Console.WriteLine(
-                $"Candidate UserId: {storedFace.UserId}, " +
-                $"Similarity: {similarity}"
-            );
+                $"CandidateId: {storedFace.CandidateId}, " +
+                $"Similarity: {similarity}");
 
             if (similarity > highestSimilarity)
             {
                 highestSimilarity = similarity;
-                bestMatchingUserId = storedFace.UserId;
+                bestMatchingCandidateId =
+                    storedFace.CandidateId;
             }
         }
 
         return highestSimilarity >= similarityThreshold
-            ? bestMatchingUserId
-            : 0;
+            ? bestMatchingCandidateId
+            : Guid.Empty;
     }
 
     private static double CalculateCosineSimilarity(
-    float[] firstEmbedding,
-    float[] secondEmbedding)
+        float[] firstEmbedding,
+        float[] secondEmbedding)
     {
         double dotProduct = 0;
         double firstMagnitude = 0;
@@ -82,47 +88,78 @@ public class FaceRecognitionService
 
         for (int i = 0; i < firstEmbedding.Length; i++)
         {
-            dotProduct += firstEmbedding[i] * secondEmbedding[i];
-            firstMagnitude += firstEmbedding[i] * firstEmbedding[i];
-            secondMagnitude += secondEmbedding[i] * secondEmbedding[i];
+            dotProduct +=
+                firstEmbedding[i] *
+                secondEmbedding[i];
+
+            firstMagnitude +=
+                firstEmbedding[i] *
+                firstEmbedding[i];
+
+            secondMagnitude +=
+                secondEmbedding[i] *
+                secondEmbedding[i];
         }
 
-        if (firstMagnitude == 0 || secondMagnitude == 0)
+        if (firstMagnitude == 0 ||
+            secondMagnitude == 0)
         {
             return 0;
         }
 
         return dotProduct /
-               (Math.Sqrt(firstMagnitude) * Math.Sqrt(secondMagnitude));
+            (Math.Sqrt(firstMagnitude) *
+             Math.Sqrt(secondMagnitude));
     }
 
-    public async Task RegisterFaceAsync(FaceRegistrationRequest request)
+    public async Task RegisterFaceAsync(
+        FaceRegistrationRequest request)
     {
-        var embedding = await _pythonFaceService
-            .GenerateEmbeddingAsync(request.Image);
+        if (request.CandidateId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "Candidate ID is required.");
+        }
 
-        var existingRegistration = await _context.FaceEmbeddings
-            .AnyAsync(f => f.UserId == request.UserId);
+        var candidateExists =
+            await _context.Candidates
+                .AnyAsync(c =>
+                    c.Id == request.CandidateId);
+
+        if (!candidateExists)
+        {
+            throw new InvalidOperationException(
+                "Candidate account was not found.");
+        }
+
+        var embedding =
+            await _pythonFaceService
+                .GenerateEmbeddingAsync(request.Image);
+
+        var existingRegistration =
+            await _context.FaceEmbeddings
+                .AnyAsync(f =>
+                    f.CandidateId == request.CandidateId);
 
         if (existingRegistration)
         {
             throw new InvalidOperationException(
-                "This user already has a registered face."
-            );
+                "This candidate already has a registered face.");
         }
 
-        var matchingUserId = await FindMatchingUserIdAsync(embedding);
+        var matchingCandidateId =
+            await FindMatchingCandidateIdAsync(
+                embedding);
 
-        if (matchingUserId != 0)
+        if (matchingCandidateId != Guid.Empty)
         {
             throw new InvalidOperationException(
-                "This face is already linked to another account."
-            );
+                "This face is already linked to another account.");
         }
 
-        var faceEmbedding = new FaceEmbedding
+        var faceEmbedding = new ResumeAnalysis.Api.Entities.FaceEmbedding
         {
-            UserId = request.UserId,
+            CandidateId = request.CandidateId,
             Embedding = JsonSerializer.Serialize(embedding)
         };
 
@@ -130,27 +167,45 @@ public class FaceRecognitionService
 
         await _context.SaveChangesAsync();
 
-        await _pythonFaceService.AddEmbeddingToIndexAsync
-        (
-            request.UserId,
-            embedding
-        );
+        await _pythonFaceService.AddEmbeddingToIndexAsync(
+            request.CandidateId,
+            embedding);
     }
 
-    public async Task<int> LoginWithFaceAsync(FaceLoginRequest request)
+    public async Task<Guid> LoginWithFaceAsync(
+        FaceLoginRequest request)
     {
-        var embedding = await _pythonFaceService
-            .GenerateEmbeddingAsync(request.Image);
+        var embedding =
+            await _pythonFaceService
+                .GenerateEmbeddingAsync(request.Image);
 
-        var matchingUserId = await FindMatchingUserIdAsync(embedding);
+        var matchingCandidateId =
+            await FindMatchingCandidateIdAsync(
+                embedding);
 
-        if (matchingUserId == 0)
+        if (matchingCandidateId == Guid.Empty)
         {
             throw new InvalidOperationException(
-                "No matching face was found."
-            );
+                "No matching face was found.");
         }
 
-        return matchingUserId;
+        return matchingCandidateId;
+    }
+
+    public async Task<ResumeAnalysis.Api.Entities.Candidate> GetCandidateAsync(
+    Guid candidateId)
+    {
+        var candidate =
+            await _context.Candidates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == candidateId);
+
+        if (candidate == null)
+        {
+            throw new UnauthorizedAccessException(
+                "Candidate account was not found.");
+        }
+
+        return candidate;
     }
 }

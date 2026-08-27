@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
-using System.Net.Http;
 
 namespace FaceRecognitionAPI.Services
 {
@@ -14,8 +13,12 @@ namespace FaceRecognitionAPI.Services
         };
 
         public async Task StartAsync(
-    CancellationToken cancellationToken)
+            CancellationToken cancellationToken)
         {
+            // ------------------------------------------------------------
+            // FaceRecognitionService project directory
+            // ------------------------------------------------------------
+
             var pythonProjectPath = Path.GetFullPath(
                 Path.Combine(
                     Directory.GetCurrentDirectory(),
@@ -24,12 +27,27 @@ namespace FaceRecognitionAPI.Services
                 )
             );
 
+            // ------------------------------------------------------------
+            // Use the dedicated Face Recognition virtual environment
+            // ------------------------------------------------------------
+
             var pythonPath = Path.Combine(
                 pythonProjectPath,
                 ".venv",
                 "Scripts",
                 "python.exe"
             );
+
+            if (!File.Exists(pythonPath))
+            {
+                throw new FileNotFoundException(
+                    "Face Recognition Python environment was not found.",
+                    pythonPath);
+            }
+
+            // ------------------------------------------------------------
+            // Start FastAPI
+            // ------------------------------------------------------------
 
             var startInfo = new ProcessStartInfo
             {
@@ -41,10 +59,23 @@ namespace FaceRecognitionAPI.Services
                 WorkingDirectory = pythonProjectPath,
 
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
             };
 
             _pythonProcess = Process.Start(startInfo);
+
+            if (_pythonProcess is null)
+            {
+                throw new InvalidOperationException(
+                    "Failed to start Face Recognition FastAPI process.");
+            }
+
+            // ------------------------------------------------------------
+            // Wait until FastAPI is ready
+            // ------------------------------------------------------------
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -69,12 +100,14 @@ namespace FaceRecognitionAPI.Services
             }
         }
 
-        public Task StopAsync(CancellationToken cancellationToken)
+        public Task StopAsync(
+            CancellationToken cancellationToken)
         {
             if (_pythonProcess is not null &&
                 !_pythonProcess.HasExited)
             {
-                _pythonProcess.Kill(entireProcessTree: true);
+                _pythonProcess.Kill(
+                    entireProcessTree: true);
             }
 
             return Task.CompletedTask;

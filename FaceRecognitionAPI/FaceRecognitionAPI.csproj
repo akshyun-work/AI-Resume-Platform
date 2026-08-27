@@ -19,5 +19,7 @@
     </PackageReference>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
-
+	<ItemGroup>
+		<ProjectReference Include="..\backend\src\ResumeAnalysis.Api\ResumeAnalysis.Api.csproj" />
+	</ItemGroup>
 </Project>
