@@ -10,6 +10,7 @@ using ResumeAnalysis.Api.Services;
 using ResumeAnalysis.Api.Services.Interfaces;
 using ResumeAnalysis.Api.Services.Storage;
 using ResumeAnalysis.Api.Services.AI;
+using ResumeAnalysis.Api.Services.JobProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -86,6 +87,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IResumeService, ResumeService>();
 builder.Services.AddScoped<IAtsService, AtsService>();
 builder.Services.AddScoped<IJobService, JobService>();
+builder.Services.AddHttpClient<IJobProvider, FreeHireJobProvider>();
 builder.Services.AddScoped<IApplicationService, ApplicationService>();
 builder.Services.AddScoped<IMatchService, MatchService>();
 builder.Services.AddScoped<IChatService, ChatService>();

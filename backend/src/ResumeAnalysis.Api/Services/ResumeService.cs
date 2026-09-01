@@ -19,7 +19,13 @@ public class ResumeService : IResumeService
     private readonly IPythonAiService _pythonAiService;
     private readonly IAtsService _atsService;
 
-    public ResumeService(ApplicationDbContext db, IFileStorage storage, IOptions<StorageSettings> options, ILogger<ResumeService> logger, IPythonAiService pythonAiService, IAtsService atsService)
+    public ResumeService(
+        ApplicationDbContext db,
+        IFileStorage storage,
+        IOptions<StorageSettings> options,
+        ILogger<ResumeService> logger,
+        IPythonAiService pythonAiService,
+        IAtsService atsService)
     {
         _db = db;
         _storage = storage;
@@ -29,52 +35,112 @@ public class ResumeService : IResumeService
         _atsService = atsService;
     }
 
-    public async Task<ResumeDto> UploadAsync(Guid candidateId, IFormFile file, CancellationToken ct)
+    public async Task<ResumeDto> UploadAsync(
+        Guid candidateId,
+        IFormFile file,
+        CancellationToken ct)
     {
         if (file == null || file.Length == 0)
             throw new ArgumentException("File is required.");
 
         if (file.Length > _settings.MaxFileSizeBytes)
-            throw new ArgumentException($"File size exceeds limit of {_settings.MaxFileSizeBytes / (1024 * 1024)} MB.");
+            throw new ArgumentException(
+                $"File size exceeds limit of {_settings.MaxFileSizeBytes / (1024 * 1024)} MB.");
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(ext) || !_settings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-            throw new ArgumentException("Only PDF files are allowed.");
+
+        if (string.IsNullOrWhiteSpace(ext) ||
+            !_settings.AllowedExtensions.Contains(
+                ext,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "Only PDF files are allowed.");
+        }
 
         var contentType = file.ContentType ?? string.Empty;
-        if (!_settings.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+
+        if (!_settings.AllowedContentTypes.Contains(
+                contentType,
+                StringComparer.OrdinalIgnoreCase))
         {
-            if (!string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Only PDF files are allowed.");
+            if (!string.Equals(
+                    contentType,
+                    "application/octet-stream",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "Only PDF files are allowed.");
+            }
         }
 
         // Validate PDF magic bytes %PDF
         using (var preview = file.OpenReadStream())
         {
             var header = new byte[4];
-            var read = await preview.ReadAsync(header, 0, 4, ct);
+
+            var read = await preview.ReadAsync(
+                header,
+                0,
+                4,
+                ct);
+
             preview.Position = 0;
-            if (read < 4 || header[0] != 0x25 || header[1] != 0x50 || header[2] != 0x44 || header[3] != 0x46) // %PDF
-                throw new ArgumentException("File is not a valid PDF.");
+
+            if (read < 4 ||
+                header[0] != 0x25 ||
+                header[1] != 0x50 ||
+                header[2] != 0x44 ||
+                header[3] != 0x46)
+            {
+                throw new ArgumentException(
+                    "File is not a valid PDF.");
+            }
         }
 
-        var candidateExists = await _db.Candidates.AnyAsync(c => c.Id == candidateId, ct);
-        if (!candidateExists) throw new KeyNotFoundException("Candidate not found.");
+        var candidateExists =
+            await _db.Candidates.AnyAsync(
+                c => c.Id == candidateId,
+                ct);
+
+        if (!candidateExists)
+            throw new KeyNotFoundException(
+                "Candidate not found.");
 
         // Compute next version
-        var maxVersion = await _db.Resumes.Where(r => r.CandidateId == candidateId).MaxAsync(r => (int?)r.VersionNumber, ct) ?? 0;
+        var maxVersion =
+            await _db.Resumes
+                .Where(r => r.CandidateId == candidateId)
+                .MaxAsync(
+                    r => (int?)r.VersionNumber,
+                    ct)
+            ?? 0;
+
         var nextVersion = maxVersion + 1;
 
         // Save file via storage abstraction
         string storageKey;
+
         using (var stream = file.OpenReadStream())
         {
-            var ctForStorage = file.ContentType ?? "application/pdf";
-            storageKey = await _storage.SaveAsync(stream, file.FileName, ctForStorage, ct);
+            var ctForStorage =
+                file.ContentType ?? "application/pdf";
+
+            storageKey = await _storage.SaveAsync(
+                stream,
+                file.FileName,
+                ctForStorage,
+                ct);
         }
 
         // Update previous latest to false
-        var previousLatests = await _db.Resumes.Where(r => r.CandidateId == candidateId && r.IsLatest).ToListAsync(ct);
+        var previousLatests =
+            await _db.Resumes
+                .Where(r =>
+                    r.CandidateId == candidateId &&
+                    r.IsLatest)
+                .ToListAsync(ct);
+
         foreach (var prev in previousLatests)
         {
             prev.IsLatest = false;
@@ -98,30 +164,68 @@ public class ResumeService : IResumeService
         };
 
         _db.Resumes.Add(resume);
+
         try
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true)
+        catch (DbUpdateException ex)
+            when (
+                ex.InnerException?.Message.Contains(
+                    "duplicate",
+                    StringComparison.OrdinalIgnoreCase) == true ||
+                ex.InnerException?.Message.Contains(
+                    "unique",
+                    StringComparison.OrdinalIgnoreCase) == true)
         {
-            // Cleanup orphaned file on version conflict (concurrent upload)
-            try { await _storage.DeleteAsync(storageKey, ct); } catch { }
-            throw new InvalidOperationException("Concurrent resume upload conflict, please retry.", ex);
+            // Cleanup orphaned file on version conflict
+            try
+            {
+                await _storage.DeleteAsync(
+                    storageKey,
+                    ct);
+            }
+            catch
+            {
+                // Ignore cleanup failure
+            }
+
+            throw new InvalidOperationException(
+                "Concurrent resume upload conflict, please retry.",
+                ex);
         }
         catch (DbUpdateException)
         {
-            try { await _storage.DeleteAsync(storageKey, ct); } catch { }
+            try
+            {
+                await _storage.DeleteAsync(
+                    storageKey,
+                    ct);
+            }
+            catch
+            {
+                // Ignore cleanup failure
+            }
+
             throw;
         }
 
-        _logger.LogInformation("Resume uploaded {ResumeId} candidate {CandidateId} version {Version} size {Size}", resume.Id, candidateId, nextVersion, file.Length);
+        _logger.LogInformation(
+            "Resume uploaded {ResumeId} candidate {CandidateId} version {Version} size {Size}",
+            resume.Id,
+            candidateId,
+            resume.VersionNumber,
+            file.Length);
 
         try
         {
             resume.Status = ResumeStatus.Processing;
             resume.UpdatedAt = DateTime.UtcNow;
+
             await _db.SaveChangesAsync(ct);
 
+            // Initial resume-only ATS analysis.
+            // No job is selected at this point.
             await _atsService.CreateAsync(
                 candidateId,
                 new ResumeAnalysis.Api.DTOs.Ats.CreateAtsRequest
@@ -132,6 +236,7 @@ public class ResumeService : IResumeService
 
             resume.Status = ResumeStatus.Processed;
             resume.UpdatedAt = DateTime.UtcNow;
+
             await _db.SaveChangesAsync(ct);
 
             _logger.LogInformation(
@@ -142,7 +247,9 @@ public class ResumeService : IResumeService
         {
             resume.Status = ResumeStatus.Failed;
             resume.UpdatedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(CancellationToken.None);
+
+            await _db.SaveChangesAsync(
+                CancellationToken.None);
 
             _logger.LogError(
                 ex,
@@ -155,89 +262,198 @@ public class ResumeService : IResumeService
         return ResumeDto.FromEntity(resume);
     }
 
-    public async Task<IReadOnlyList<ResumeDto>> ListAsync(Guid candidateId, CancellationToken ct)
+    public async Task<IReadOnlyList<ResumeDto>> ListAsync(
+        Guid candidateId,
+        CancellationToken ct)
     {
         var list = await _db.Resumes
             .AsNoTracking()
             .Where(r => r.CandidateId == candidateId)
             .OrderByDescending(r => r.VersionNumber)
             .ToListAsync(ct);
-        return list.Select(ResumeDto.FromEntity).ToList();
+
+        return list
+            .Select(ResumeDto.FromEntity)
+            .ToList();
     }
 
-    public async Task<ResumeDto> GetAsync(Guid candidateId, Guid resumeId, CancellationToken ct)
+    public async Task<ResumeDto> GetAsync(
+        Guid candidateId,
+        Guid resumeId,
+        CancellationToken ct)
     {
-        if (resumeId == Guid.Empty) throw new ArgumentException("Invalid id.");
-        var r = await _db.Resumes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == resumeId, ct);
-        if (r == null) throw new KeyNotFoundException("Resume not found.");
-        if (r.CandidateId != candidateId) throw new UnauthorizedAccessException("Access denied.");
+        if (resumeId == Guid.Empty)
+            throw new ArgumentException(
+                "Invalid id.");
+
+        var r = await _db.Resumes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == resumeId,
+                ct);
+
+        if (r == null)
+            throw new KeyNotFoundException(
+                "Resume not found.");
+
+        if (r.CandidateId != candidateId)
+            throw new UnauthorizedAccessException(
+                "Access denied.");
+
         return ResumeDto.FromEntity(r);
     }
 
-    public async Task<(Stream stream, string contentType, string fileName)> DownloadAsync(Guid candidateId, Guid resumeId, CancellationToken ct)
+    public async Task<(
+        Stream stream,
+        string contentType,
+        string fileName)> DownloadAsync(
+        Guid candidateId,
+        Guid resumeId,
+        CancellationToken ct)
     {
-        if (resumeId == Guid.Empty) throw new ArgumentException("Invalid id.");
-        var r = await _db.Resumes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == resumeId, ct);
-        if (r == null) throw new KeyNotFoundException("Resume not found.");
-        if (r.CandidateId != candidateId) throw new UnauthorizedAccessException("Access denied.");
-        var stream = await _storage.OpenReadAsync(r.StoragePath, ct);
-        return (stream, r.ContentType, r.OriginalFileName);
+        if (resumeId == Guid.Empty)
+            throw new ArgumentException(
+                "Invalid id.");
+
+        var r = await _db.Resumes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == resumeId,
+                ct);
+
+        if (r == null)
+            throw new KeyNotFoundException(
+                "Resume not found.");
+
+        if (r.CandidateId != candidateId)
+            throw new UnauthorizedAccessException(
+                "Access denied.");
+
+        var stream =
+            await _storage.OpenReadAsync(
+                r.StoragePath,
+                ct);
+
+        return (
+            stream,
+            r.ContentType,
+            r.OriginalFileName);
     }
 
-    public async Task DeleteAsync(Guid candidateId, Guid resumeId, CancellationToken ct)
+    public async Task DeleteAsync(
+        Guid candidateId,
+        Guid resumeId,
+        CancellationToken ct)
     {
-        if (resumeId == Guid.Empty) throw new ArgumentException("Invalid id.");
-        var r = await _db.Resumes.FirstOrDefaultAsync(x => x.Id == resumeId, ct);
-        if (r == null) throw new KeyNotFoundException("Resume not found.");
-        if (r.CandidateId != candidateId) throw new UnauthorizedAccessException("Access denied.");
+        if (resumeId == Guid.Empty)
+            throw new ArgumentException(
+                "Invalid id.");
+
+        var r = await _db.Resumes
+            .FirstOrDefaultAsync(
+                x => x.Id == resumeId,
+                ct);
+
+        if (r == null)
+            throw new KeyNotFoundException(
+                "Resume not found.");
+
+        if (r.CandidateId != candidateId)
+            throw new UnauthorizedAccessException(
+                "Access denied.");
 
         var wasLatest = r.IsLatest;
         var storagePath = r.StoragePath;
 
         _db.Resumes.Remove(r);
+
         await _db.SaveChangesAsync(ct);
 
-        try { await _storage.DeleteAsync(storagePath, ct); } catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete file {Path}", storagePath); }
+        try
+        {
+            await _storage.DeleteAsync(
+                storagePath,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to delete file {Path}",
+                storagePath);
+        }
 
-        _logger.LogInformation("Resume deleted {ResumeId} candidate {CandidateId}", resumeId, candidateId);
+        _logger.LogInformation(
+            "Resume deleted {ResumeId} candidate {CandidateId}",
+            resumeId,
+            candidateId);
 
         if (wasLatest)
         {
-            var newLatest = await _db.Resumes.Where(x => x.CandidateId == candidateId).OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
+            var newLatest =
+                await _db.Resumes
+                    .Where(x =>
+                        x.CandidateId == candidateId)
+                    .OrderByDescending(
+                        x => x.VersionNumber)
+                    .FirstOrDefaultAsync(ct);
+
             if (newLatest != null)
             {
                 newLatest.IsLatest = true;
                 newLatest.UpdatedAt = DateTime.UtcNow;
+
                 await _db.SaveChangesAsync(ct);
-                _logger.LogInformation("New latest resume {ResumeId} version {Version}", newLatest.Id, newLatest.VersionNumber);
+
+                _logger.LogInformation(
+                    "New latest resume {ResumeId} version {Version}",
+                    newLatest.Id,
+                    newLatest.VersionNumber);
             }
         }
     }
 
-    public async Task<ResumeDto?> GetLatestAsync(Guid candidateId, CancellationToken ct)
+    public async Task<ResumeDto?> GetLatestAsync(
+        Guid candidateId,
+        CancellationToken ct)
     {
-        var r = await _db.Resumes.AsNoTracking()
-            .Where(x => x.CandidateId == candidateId && x.IsLatest)
+        var r = await _db.Resumes
+            .AsNoTracking()
+            .Where(x =>
+                x.CandidateId == candidateId &&
+                x.IsLatest)
             .FirstOrDefaultAsync(ct);
+
         if (r == null)
         {
-            r = await _db.Resumes.AsNoTracking().Where(x => x.CandidateId == candidateId).OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct);
+            r = await _db.Resumes
+                .AsNoTracking()
+                .Where(x =>
+                    x.CandidateId == candidateId)
+                .OrderByDescending(
+                    x => x.VersionNumber)
+                .FirstOrDefaultAsync(ct);
         }
-        return r == null ? null : ResumeDto.FromEntity(r);
+
+        return r == null
+            ? null
+            : ResumeDto.FromEntity(r);
     }
 
     public async Task<string> AnalyzeAsync(
-    Guid candidateId,
-    Guid resumeId,
-    string jobDescription,
-    object? jobData,
-    CancellationToken ct)
+        Guid candidateId,
+        Guid resumeId,
+        string jobDescription,
+        object? jobData,
+        CancellationToken ct)
     {
         if (resumeId == Guid.Empty)
-            throw new ArgumentException("Invalid resume id.");
+            throw new ArgumentException(
+                "Invalid resume id.");
 
         if (string.IsNullOrWhiteSpace(jobDescription))
-            throw new ArgumentException("Job description is required.");
+            throw new ArgumentException(
+                "Job description is required.");
 
         var resume = await _db.Resumes
             .AsNoTracking()
@@ -246,14 +462,15 @@ public class ResumeService : IResumeService
                 ct);
 
         if (resume == null)
-            throw new KeyNotFoundException("Resume not found.");
+            throw new KeyNotFoundException(
+                "Resume not found.");
 
         if (resume.CandidateId != candidateId)
-            throw new UnauthorizedAccessException("Access denied to resume.");
+            throw new UnauthorizedAccessException(
+                "Access denied to resume.");
 
-        // The LocalFileStorage implementation stores files under
-        // AppContext.BaseDirectory/Storage/Resumes and returns the
-        // generated filename as StoragePath.
+        // LocalFileStorage stores files under:
+        // AppContext.BaseDirectory/Storage/Resumes
         var storageDirectory = Path.Combine(
             AppContext.BaseDirectory,
             "Storage",
@@ -273,16 +490,64 @@ public class ResumeService : IResumeService
             resumeId,
             candidateId);
 
-        var result = await _pythonAiService.AnalyzeResumeAsync(
-            pdfPath,
-            jobDescription,
-            jobData,
-            ct);
+        // ------------------------------------------------------------
+        // 1. Run the job-specific analysis requested by the frontend.
+        // ------------------------------------------------------------
+
+        var result =
+            await _pythonAiService.AnalyzeResumeAsync(
+                pdfPath,
+                jobDescription,
+                jobData,
+                ct);
 
         _logger.LogInformation(
-            "AI analysis completed for resume {ResumeId} candidate {CandidateId}",
+            "AI job analysis completed for resume {ResumeId} candidate {CandidateId}",
             resumeId,
             candidateId);
+
+        // ------------------------------------------------------------
+        // 2. Persist a job-specific ATS analysis.
+        //
+        // CreateAtsRequest now accepts the selected job description
+        // and job data, so AtsService can populate:
+        //
+        // - KeywordsIdentified
+        // - MissingKeywords
+        // - MissingSkills
+        // - Issues
+        // - Recommendations
+        //
+        // The initial upload analysis remains resume-only.
+        // ------------------------------------------------------------
+
+        try
+        {
+            await _atsService.CreateAsync(
+                candidateId,
+                new ResumeAnalysis.Api.DTOs.Ats.CreateAtsRequest
+                {
+                    ResumeId = resumeId,
+                    JobDescription = jobDescription,
+                    JobData = jobData
+                },
+                ct);
+
+            _logger.LogInformation(
+                "Job-specific ATS analysis persisted for resume {ResumeId} candidate {CandidateId}",
+                resumeId,
+                candidateId);
+        }
+        catch (Exception ex)
+        {
+            // Do not hide the successful job-analysis result if ATS
+            // persistence fails. Log it so the backend exposes the
+            // persistence problem during testing.
+            _logger.LogError(
+                ex,
+                "Failed to persist job-specific ATS analysis for resume {ResumeId}",
+                resumeId);
+        }
 
         return result;
     }

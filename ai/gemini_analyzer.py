@@ -1,5 +1,5 @@
 import os
-
+import json
 from ats_analyzer import calculate_ats_score
 from pathlib import Path
 
@@ -211,57 +211,93 @@ def build_candidate_context(
 
 def build_prompt(context):
     """
-    Build the instruction sent to Gemini.
+    Build a structured prompt for the job-match explanation.
     """
 
     return f"""
-You are an AI career advisor inside a resume
-analysis platform.
+You are an AI career advisor inside a resume analysis platform.
 
-You must analyze ONLY the information provided
-below.
+Analyze ONLY the candidate and job information provided below.
 
-Do not invent:
-- skills
-- experience
-- projects
-- qualifications
-- achievements
-- certifications
+The Python system has already calculated:
+- the job match score
+- matched required skills
+- missing required skills
+- matched preferred skills
+- missing preferred skills
+- matched job-specific skills
+- missing job-specific skills
 
-The Python system has already calculated the
-job match score and skill matches. Do not change
-those scores.
+DO NOT change, recalculate, or invent these values.
 
 Candidate analysis data:
 
 {context}
 
-Provide the following:
+Your task is ONLY to generate the "Why This Match" explanation.
 
-1. Resume strengths
-2. Resume weaknesses
-3. Explanation of the current job match
-4. Most important missing skills
-5. Three prioritized improvement actions
-6. Career direction based on the available
-   evidence
+Return ONLY valid JSON.
+Do not use Markdown.
+Do not use ```json.
+Do not add any text before or after the JSON.
 
-Keep the response practical and concise.
+Use EXACTLY this structure:
 
-Clearly distinguish between:
-- skills the candidate already has
-- skills that are missing
-- skills that should be learned
+{{
+  "match_summary": "A concise explanation of how well the candidate matches this role.",
 
-Do not claim that learning a skill means the
-candidate already possesses it.
+  "why_you_match": [
+    "skill or capability the candidate already has"
+  ],
+
+  "what_is_missing": {{
+    "required": [
+      "missing required skill"
+    ],
+    "preferred": [
+      "missing preferred skill"
+    ],
+    "job_specific": [
+      "missing job-specific skill"
+    ]
+  }},
+
+  "score_explanation": {{
+    "score": 0,
+    "explanation": "A concise explanation of why the calculated score is at this level.",
+    "factors": [
+      "factor affecting the score"
+    ]
+  }},
+
+  "improvement_actions": [
+    "First prioritized improvement action",
+    "Second prioritized improvement action",
+    "Third prioritized improvement action"
+  ]
+}}
+
+Rules:
+
+1. "why_you_match" must contain ONLY skills/capabilities that are present in the provided matched data.
+2. "what_is_missing.required" must contain ONLY missing_required skills.
+3. "what_is_missing.preferred" must contain ONLY missing_preferred skills.
+4. "what_is_missing.job_specific" must contain ONLY missing_job_skills.
+5. Do not move a skill from one category to another.
+6. "score" must exactly equal the Python-calculated job match score.
+7. "factors" must explain the actual missing skills or other provided factors affecting the score.
+8. Do not claim the candidate has a missing skill.
+9. Do not invent AWS, Microservices, CI/CD, OOP, REST APIs, or any other skill unless it exists in the supplied job analysis.
+10. "improvement_actions" should contain at most 3 practical actions based on the missing skills.
+11. If a category has no missing skills, return an empty array.
+12. Keep the explanation concise and professional.
 """
 
 
 def analyze_with_gemini(context):
     """
-    Send the structured analysis to Gemini.
+    Send the structured analysis to Gemini and return
+    validated JSON as a string.
     """
 
     try:
@@ -270,7 +306,7 @@ def analyze_with_gemini(context):
         prompt = build_prompt(context)
 
         response = client.models.generate_content(
-            model="gemini-3.6-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt
         )
 
@@ -279,17 +315,41 @@ def analyze_with_gemini(context):
                 "Gemini returned an empty response."
             )
 
-        return response.text
+        raw_text = response.text.strip()
+
+        # Remove accidental Markdown fences if Gemini adds them.
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+
+        if raw_text.startswith("```"):
+            raw_text = raw_text[3:]
+
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+
+        raw_text = raw_text.strip()
+
+        # Validate that Gemini actually returned JSON.
+        parsed = json.loads(raw_text)
+
+        # Return normalized JSON so ASP.NET receives predictable data.
+        return json.dumps(
+            parsed,
+            ensure_ascii=False
+        )
+
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+        f"Gemini returned invalid JSON: {error}"
+        ) from error
 
     except ValueError:
-        # Preserve configuration errors such as
-        # missing GEMINI_API_KEY.
         raise
 
     except Exception as error:
         raise RuntimeError(
-            f"Gemini analysis failed: {error}"
-        ) from error
+        f"Gemini analysis failed: {error}"
+    ) from error
 
 def print_gemini_analysis(
     resume,
@@ -736,6 +796,58 @@ def run_api_pipeline(pdf_path, job_description=None, job_data=None):
             (keyword_score * 0.60)
             + (semantic_score * 0.40)
         )
+
+        # Build structured job-specific ATS fields from the existing
+        # comparison result. These are only populated when a job is
+        # supplied; a resume-only ATS analysis keeps them null.
+        matched_required = comparison.get("matched_required", []) or []
+        matched_preferred = comparison.get("matched_preferred", []) or []
+        matched_job_skills = comparison.get("matched_job_skills", []) or []
+        missing_required = comparison.get("missing_required", []) or []
+        missing_preferred = comparison.get("missing_preferred", []) or []
+        missing_job_skills = comparison.get("missing_job_skills", []) or []
+
+        keywords_identified = list(dict.fromkeys(
+            matched_required + matched_preferred + matched_job_skills
+        ))
+
+        missing_keywords = list(dict.fromkeys(
+            missing_required + missing_preferred + missing_job_skills
+        ))
+
+        missing_skills = list(dict.fromkeys(
+            missing_required + missing_preferred
+        ))
+
+        issues = []
+        if missing_required:
+            issues.append(
+                "Missing required skills: "
+                + ", ".join(str(skill) for skill in missing_required)
+            )
+        if missing_preferred:
+            issues.append(
+                "Missing preferred skills: "
+                + ", ".join(str(skill) for skill in missing_preferred)
+            )
+        if missing_job_skills:
+            issues.append(
+                "Missing job-specific skills: "
+                + ", ".join(str(skill) for skill in missing_job_skills)
+            )
+
+        recommendations = [
+            f"Develop {skill} to improve alignment with the selected job."
+            for skill in missing_skills
+        ]
+
+        ats_result.update({
+            "keywords_identified": keywords_identified,
+            "missing_keywords": missing_keywords,
+            "missing_skills": missing_skills,
+            "issues": issues,
+            "recommendations": recommendations
+        })
 
     # -----------------------------------------
     # Career recommendations

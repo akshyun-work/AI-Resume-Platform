@@ -14,15 +14,23 @@ public class MatchService : IMatchService
     private readonly ILogger<MatchService> _logger;
     private readonly IPythonAiService _pythonAiService;
 
-    public MatchService(ApplicationDbContext db, ILogger<MatchService> logger, IPythonAiService pythonAiService)
+    public MatchService(
+        ApplicationDbContext db,
+        ILogger<MatchService> logger,
+        IPythonAiService pythonAiService)
     {
         _db = db;
         _logger = logger;
         _pythonAiService = pythonAiService;
     }
 
-    private static string? Serialize<T>(T? obj) => obj == null ? null : JsonSerializer.Serialize(obj);
-    private static T? Deserialize<T>(string? json) => string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json);
+    private static string? Serialize<T>(T? obj) =>
+        obj == null ? null : JsonSerializer.Serialize(obj);
+
+    private static T? Deserialize<T>(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? default
+            : JsonSerializer.Deserialize<T>(json);
 
     private static MatchResultDto ToDto(MatchResult m) => new()
     {
@@ -33,19 +41,30 @@ public class MatchService : IMatchService
         JobTitle = m.Job?.Title ?? string.Empty,
         Company = m.Job?.Company ?? string.Empty,
         MatchScore = m.MatchScore,
-        MatchingSkills = Deserialize<List<string>>(m.MatchingSkillsJson),
-        MissingSkills = Deserialize<List<string>>(m.MissingSkillsJson),
-        MatchingKeywords = Deserialize<List<string>>(m.MatchingKeywordsJson),
-        MissingKeywords = Deserialize<List<string>>(m.MissingKeywordsJson),
-        Reasons = Deserialize<List<string>>(m.ReasonsJson),
+
+        MatchingSkills =
+            Deserialize<List<string>>(m.MatchingSkillsJson),
+
+        MissingSkills =
+            Deserialize<List<string>>(m.MissingSkillsJson),
+
+        MatchingKeywords =
+            Deserialize<List<string>>(m.MatchingKeywordsJson),
+
+        MissingKeywords =
+            Deserialize<List<string>>(m.MissingKeywordsJson),
+
+        Reasons =
+            Deserialize<List<string>>(m.ReasonsJson),
+
         CreatedAt = m.CreatedAt,
         UpdatedAt = m.UpdatedAt
     };
 
     public async Task<MatchResultDto> CreateAsync(
-    Guid candidateId,
-    CreateMatchRequest request,
-    CancellationToken ct)
+        Guid candidateId,
+        CreateMatchRequest request,
+        CancellationToken ct)
     {
         if (request.ResumeId == Guid.Empty)
             throw new ArgumentException("ResumeId is required.");
@@ -55,10 +74,13 @@ public class MatchService : IMatchService
 
         var resume = await _db.Resumes
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == request.ResumeId, ct);
+            .FirstOrDefaultAsync(
+                r => r.Id == request.ResumeId,
+                ct);
 
         if (resume == null)
-            throw new KeyNotFoundException("Resume not found.");
+            throw new KeyNotFoundException(
+                "Resume not found.");
 
         if (resume.CandidateId != candidateId)
             throw new UnauthorizedAccessException(
@@ -66,15 +88,21 @@ public class MatchService : IMatchService
 
         var job = await _db.Jobs
             .AsNoTracking()
-            .FirstOrDefaultAsync(j => j.Id == request.JobId, ct);
+            .FirstOrDefaultAsync(
+                j => j.Id == request.JobId,
+                ct);
 
         if (job == null)
-            throw new KeyNotFoundException("Job not found.");
+            throw new KeyNotFoundException(
+                "Job not found.");
 
+        // ------------------------------------------------------------
         // Build job data for the Python AI pipeline.
+        // ------------------------------------------------------------
+
         var requiredSkills =
-    Deserialize<List<string>>(job.RequiredSkillsJson)
-    ?? new List<string>();
+            Deserialize<List<string>>(job.RequiredSkillsJson)
+            ?? new List<string>();
 
         var preferredSkills =
             Deserialize<List<string>>(job.PreferredSkillsJson)
@@ -103,12 +131,16 @@ public class MatchService : IMatchService
                 .ToList()
         };
 
+        // ------------------------------------------------------------
         // Run the existing Python AI pipeline.
-        var pythonOutput = await _pythonAiService.AnalyzeResumeAsync(
-            resume.StoragePath,
-            job.Description,
-            jobData,
-            ct);
+        // ------------------------------------------------------------
+
+        var pythonOutput =
+            await _pythonAiService.AnalyzeResumeAsync(
+                resume.StoragePath,
+                job.Description,
+                jobData,
+                ct);
 
         JsonDocument document;
 
@@ -133,18 +165,32 @@ public class MatchService : IMatchService
         {
             var root = document.RootElement;
 
+            // --------------------------------------------------------
+            // Match score
+            // --------------------------------------------------------
+
             var matchScore =
-                root.TryGetProperty("match_score", out var scoreElement)
+                root.TryGetProperty(
+                    "match_score",
+                    out var scoreElement)
                     ? scoreElement.GetInt32()
                     : 0;
+
+            // --------------------------------------------------------
+            // Existing comparison data
+            //
+            // These values are calculated by Python and should remain
+            // the source of truth for the match result.
+            // --------------------------------------------------------
 
             List<string>? matchingSkills = null;
             List<string>? missingSkills = null;
             List<string>? matchingKeywords = null;
             List<string>? missingKeywords = null;
-            List<string>? reasons = null;
 
-            if (root.TryGetProperty("comparison", out var comparison)
+            if (root.TryGetProperty(
+                    "comparison",
+                    out var comparison)
                 && comparison.ValueKind == JsonValueKind.Object)
             {
                 if (comparison.TryGetProperty(
@@ -184,41 +230,101 @@ public class MatchService : IMatchService
                 }
             }
 
+            // --------------------------------------------------------
+            // Why This Match
+            //
+            // Gemini returns a STRUCTURED JSON object:
+            //
+            // {
+            //   match_summary,
+            //   why_you_match,
+            //   what_is_missing,
+            //   score_explanation,
+            //   improvement_actions
+            // }
+            //
+            // We intentionally keep this structured JSON intact
+            // inside the existing Reasons field so the current
+            // frontend contract is not broken.
+            // --------------------------------------------------------
+
+            List<string>? reasons = null;
+
             if (root.TryGetProperty(
                     "gemini_analysis",
-                    out var geminiAnalysis)
-                && geminiAnalysis.ValueKind == JsonValueKind.String)
+                    out var geminiAnalysis))
             {
-                reasons = new List<string>
-            {
-                geminiAnalysis.GetString() ?? string.Empty
-            };
+                if (geminiAnalysis.ValueKind == JsonValueKind.Object)
+                {
+                    // Store the complete structured object as one
+                    // JSON string inside the existing Reasons list.
+                    //
+                    // The frontend can deserialize Reasons[0] and
+                    // render the individual sections.
+                    reasons = new List<string>
+                    {
+                        geminiAnalysis.GetRawText()
+                    };
+                }
+                else if (geminiAnalysis.ValueKind == JsonValueKind.String)
+                {
+                    // Backward compatibility for older Python output.
+                    var analysisText =
+                        geminiAnalysis.GetString();
+
+                    if (!string.IsNullOrWhiteSpace(analysisText))
+                    {
+                        reasons = new List<string>
+                        {
+                            analysisText
+                        };
+                    }
+                }
             }
+
+            // --------------------------------------------------------
+            // Create database entity
+            // --------------------------------------------------------
 
             var entity = new MatchResult
             {
                 Id = Guid.NewGuid(),
+
                 CandidateId = candidateId,
                 ResumeId = resume.Id,
                 JobId = job.Id,
-                MatchScore = Math.Clamp(matchScore, 0, 100),
+
+                MatchScore =
+                    Math.Clamp(
+                        matchScore,
+                        0,
+                        100),
+
                 MatchingSkillsJson =
                     Serialize(matchingSkills),
+
                 MissingSkillsJson =
                     Serialize(missingSkills),
+
                 MatchingKeywordsJson =
                     Serialize(matchingKeywords),
+
                 MissingKeywordsJson =
                     Serialize(missingKeywords),
+
                 ReasonsJson =
                     Serialize(reasons),
+
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
             _db.MatchResults.Add(entity);
+
             await _db.SaveChangesAsync(ct);
 
+            // Attach the already-loaded job so ToDto()
+            // can populate JobTitle and Company.
             entity.Job = job;
 
             _logger.LogInformation(
@@ -233,44 +339,107 @@ public class MatchService : IMatchService
         }
     }
 
-    public async Task<MatchResultDto> GetByIdAsync(Guid candidateId, Guid matchId, CancellationToken ct)
+    public async Task<MatchResultDto> GetByIdAsync(
+        Guid candidateId,
+        Guid matchId,
+        CancellationToken ct)
     {
-        if (matchId == Guid.Empty) throw new ArgumentException("Invalid id.");
-        var m = await _db.MatchResults.Include(x => x.Job).AsNoTracking().FirstOrDefaultAsync(x => x.Id == matchId, ct);
-        if (m == null) throw new KeyNotFoundException("Match not found.");
-        if (m.CandidateId != candidateId) throw new UnauthorizedAccessException("Access denied.");
+        if (matchId == Guid.Empty)
+            throw new ArgumentException("Invalid id.");
+
+        var m = await _db.MatchResults
+            .Include(x => x.Job)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == matchId,
+                ct);
+
+        if (m == null)
+            throw new KeyNotFoundException(
+                "Match not found.");
+
+        if (m.CandidateId != candidateId)
+            throw new UnauthorizedAccessException(
+                "Access denied.");
+
         return ToDto(m);
     }
 
-    public async Task<IReadOnlyList<MatchResultDto>> ListAsync(Guid candidateId, CancellationToken ct)
+    public async Task<IReadOnlyList<MatchResultDto>> ListAsync(
+        Guid candidateId,
+        CancellationToken ct)
     {
-        var list = await _db.MatchResults.Include(x => x.Job).AsNoTracking()
+        var list = await _db.MatchResults
+            .Include(x => x.Job)
+            .AsNoTracking()
             .Where(x => x.CandidateId == candidateId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
-        return list.Select(ToDto).ToList();
+
+        return list
+            .Select(ToDto)
+            .ToList();
     }
 
-    public async Task<IReadOnlyList<MatchResultDto>> ListForJobAsync(Guid candidateId, Guid jobId, CancellationToken ct)
+    public async Task<IReadOnlyList<MatchResultDto>> ListForJobAsync(
+        Guid candidateId,
+        Guid jobId,
+        CancellationToken ct)
     {
-        var job = await _db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, ct);
-        if (job == null) throw new KeyNotFoundException("Job not found.");
-        var list = await _db.MatchResults.Include(x => x.Job).AsNoTracking()
-            .Where(x => x.CandidateId == candidateId && x.JobId == jobId)
+        var job = await _db.Jobs
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                j => j.Id == jobId,
+                ct);
+
+        if (job == null)
+            throw new KeyNotFoundException(
+                "Job not found.");
+
+        var list = await _db.MatchResults
+            .Include(x => x.Job)
+            .AsNoTracking()
+            .Where(x =>
+                x.CandidateId == candidateId &&
+                x.JobId == jobId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
-        return list.Select(ToDto).ToList();
+
+        return list
+            .Select(ToDto)
+            .ToList();
     }
 
-    public async Task<IReadOnlyList<MatchResultDto>> ListForResumeAsync(Guid candidateId, Guid resumeId, CancellationToken ct)
+    public async Task<IReadOnlyList<MatchResultDto>> ListForResumeAsync(
+        Guid candidateId,
+        Guid resumeId,
+        CancellationToken ct)
     {
-        var resume = await _db.Resumes.AsNoTracking().FirstOrDefaultAsync(r => r.Id == resumeId, ct);
-        if (resume == null) throw new KeyNotFoundException("Resume not found.");
-        if (resume.CandidateId != candidateId) throw new UnauthorizedAccessException("Access denied to resume.");
-        var list = await _db.MatchResults.Include(x => x.Job).AsNoTracking()
-            .Where(x => x.CandidateId == candidateId && x.ResumeId == resumeId)
+        var resume = await _db.Resumes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                r => r.Id == resumeId,
+                ct);
+
+        if (resume == null)
+            throw new KeyNotFoundException(
+                "Resume not found.");
+
+        if (resume.CandidateId != candidateId)
+            throw new UnauthorizedAccessException(
+                "Access denied to resume.");
+
+        var list = await _db.MatchResults
+            .Include(x => x.Job)
+            .AsNoTracking()
+            .Where(x =>
+                x.CandidateId == candidateId &&
+                x.ResumeId == resumeId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
-        return list.Select(ToDto).ToList();
+
+        return list
+            .Select(ToDto)
+            .ToList();
     }
 }

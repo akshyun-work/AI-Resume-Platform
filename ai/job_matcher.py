@@ -214,6 +214,12 @@ def analyze_job(job_text, job_data=None):
         responsibilities_text
     )
 
+    # If no explicit required/preferred section exists,
+    # treat skills detected from the complete job description
+    # as required job skills.
+    if not required_skills and not preferred_skills:
+        required_skills = responsibility_skills.copy()
+
         # ---------------------------------------------------------
     # FreeHire provides a structured list of job skills.
     # These are useful even when the listing does not provide

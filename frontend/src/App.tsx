@@ -160,7 +160,43 @@ function App() {
             setLoading(false);
         }
     };
+    // ============================================================
+    // Refresh latest ATS analysis
+    // ============================================================
 
+    const refreshLatestAnalysis = async () => {
+        if (!latestResume?.id) {
+            setAnalysis(null);
+            return;
+        }
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            const analysisResponse =
+                await apiRequest<ApiResponse<AtsAnalysis>>(
+                    `/api/ats/resume/${latestResume.id}`
+                );
+
+            if (
+                analysisResponse.success &&
+                analysisResponse.data
+            ) {
+                setAnalysis(analysisResponse.data);
+            } else {
+                setAnalysis(null);
+            }
+        } catch (err) {
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : 'Unable to refresh ATS analysis.'
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
     // ============================================================
     // Load data after authentication
     // ============================================================
@@ -363,9 +399,10 @@ function App() {
                             {/* ATS */}
 
                             <button
-                                onClick={() =>
-                                    setPage('results')
-                                }
+                                onClick={async () => {
+                                    await refreshLatestAnalysis();
+                                    setPage('results');
+                                }}
                                 className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-left transition hover:border-purple-500/50"
                             >
                                 <BarChart3
@@ -508,9 +545,10 @@ function App() {
                                     <div className="flex gap-2">
 
                                         <button
-                                            onClick={() =>
-                                                setPage('results')
-                                            }
+                                            onClick={async () => {
+                                                await refreshLatestAnalysis();
+                                                setPage('results');
+                                            }}
                                             className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
                                         >
                                             ATS Results
