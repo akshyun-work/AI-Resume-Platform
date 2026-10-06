@@ -16,6 +16,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<FaceEmbedding> FaceEmbeddings => Set<FaceEmbedding>();
+    public DbSet<PasswordResetOtp> PasswordResetOtps => Set<PasswordResetOtp>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -106,6 +107,15 @@ public class ApplicationDbContext : DbContext
 
             e.Property(x => x.CreatedAt)
                 .HasDefaultValueSql("GETUTCDATE()");
+        });
+
+        modelBuilder.Entity<PasswordResetOtp>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).HasMaxLength(256).IsRequired();
+            e.Property(x => x.Otp).HasMaxLength(10).IsRequired();
+            e.HasIndex(x => x.Email);
+            e.HasIndex(x => new { x.Email, x.IsUsed, x.ExpiresAt });
         });
     }
 }

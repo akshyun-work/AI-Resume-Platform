@@ -4,6 +4,7 @@ using ResumeAnalysis.Api.Data;
 using ResumeAnalysis.Api.DTOs.Jobs;
 using ResumeAnalysis.Api.Entities;
 using ResumeAnalysis.Api.Services.Interfaces;
+using ResumeAnalysis.Api.Services.AI;
 
 namespace ResumeAnalysis.Api.Services;
 
@@ -12,15 +13,18 @@ public class JobService : IJobService
     private readonly ApplicationDbContext _db;
     private readonly ILogger<JobService> _logger;
     private readonly IJobProvider _jobProvider;
+    private readonly IPythonAiService _pythonAiService;
 
     public JobService(
         ApplicationDbContext db,
         ILogger<JobService> logger,
-        IJobProvider jobProvider)
+        IJobProvider jobProvider,
+        IPythonAiService pythonAiService)
     {
         _db = db;
         _logger = logger;
         _jobProvider = jobProvider;
+        _pythonAiService = pythonAiService;
     }
 
     private static string? Serialize(List<string>? list) =>
@@ -30,6 +34,19 @@ public class JobService : IJobService
         string.IsNullOrWhiteSpace(json)
             ? null
             : JsonSerializer.Deserialize<List<string>>(json);
+
+    private static JsonElement? DeserializeStructured(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private static JobDto ToDto(Job j) => new()
     {
@@ -41,6 +58,7 @@ public class JobService : IJobService
         EmploymentType = j.EmploymentType,
         RequiredSkills = Deserialize(j.RequiredSkillsJson),
         PreferredSkills = Deserialize(j.PreferredSkillsJson),
+        Structured = DeserializeStructured(j.StructuredJson),
         IsActive = j.IsActive,
         CreatedAt = j.CreatedAt,
         UpdatedAt = j.UpdatedAt
@@ -50,6 +68,37 @@ public class JobService : IJobService
         CreateJobRequest request,
         CancellationToken ct)
     {
+        string? structuredJson = null;
+        try
+        {
+            structuredJson = await _pythonAiService.StructureJobAsync(request.Description, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to structure job description via AI during creation.");
+        }
+
+        var requiredSkills = request.RequiredSkills;
+        var preferredSkills = request.PreferredSkills;
+
+        // If skills were not provided, extract from structured JSON if available
+        if ((requiredSkills == null || requiredSkills.Count == 0) && !string.IsNullOrWhiteSpace(structuredJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(structuredJson);
+                if (doc.RootElement.TryGetProperty("requiredSkills", out var reqEl) && reqEl.ValueKind == JsonValueKind.Array)
+                {
+                    requiredSkills = JsonSerializer.Deserialize<List<string>>(reqEl.GetRawText());
+                }
+                if (doc.RootElement.TryGetProperty("preferredSkills", out var prefEl) && prefEl.ValueKind == JsonValueKind.Array)
+                {
+                    preferredSkills = JsonSerializer.Deserialize<List<string>>(prefEl.GetRawText());
+                }
+            }
+            catch { }
+        }
+
         var job = new Job
         {
             Id = Guid.NewGuid(),
@@ -62,8 +111,9 @@ public class JobService : IJobService
             EmploymentType = string.IsNullOrWhiteSpace(request.EmploymentType)
                 ? null
                 : request.EmploymentType.Trim(),
-            RequiredSkillsJson = Serialize(request.RequiredSkills),
-            PreferredSkillsJson = Serialize(request.PreferredSkills),
+            RequiredSkillsJson = Serialize(requiredSkills),
+            PreferredSkillsJson = Serialize(preferredSkills),
+            StructuredJson = structuredJson,
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -152,11 +202,39 @@ public class JobService : IJobService
             throw new ArgumentException("Invalid id.");
 
         var job = await _db.Jobs
-            .AsNoTracking()
             .FirstOrDefaultAsync(j => j.Id == jobId, ct);
 
         if (job == null)
             throw new KeyNotFoundException("Job not found.");
+
+        if (string.IsNullOrWhiteSpace(job.StructuredJson))
+        {
+            try
+            {
+                var structured = await _pythonAiService.StructureJobAsync(job.Description, ct);
+                if (!string.IsNullOrWhiteSpace(structured) && structured != "{}")
+                {
+                    job.StructuredJson = structured;
+                    job.UpdatedAt = DateTime.UtcNow;
+
+                    // Also sync skills if they were missing
+                    if (string.IsNullOrWhiteSpace(job.RequiredSkillsJson))
+                    {
+                        using var doc = JsonDocument.Parse(structured);
+                        if (doc.RootElement.TryGetProperty("requiredSkills", out var reqEl) && reqEl.ValueKind == JsonValueKind.Array)
+                        {
+                            job.RequiredSkillsJson = reqEl.GetRawText();
+                        }
+                    }
+
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to lazily structure job {JobId}", jobId);
+            }
+        }
 
         return ToDto(job);
     }

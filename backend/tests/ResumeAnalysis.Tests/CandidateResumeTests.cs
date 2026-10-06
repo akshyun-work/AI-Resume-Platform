@@ -110,7 +110,7 @@ public class CandidateResumeTests : IClassFixture<ResumeTestFactory>
         Assert.NotNull(dto1!.Data);
         Assert.Equal(1, dto1.Data!.VersionNumber);
         Assert.True(dto1.Data.IsLatest);
-        Assert.Equal("Uploaded", dto1.Data.Status);
+        Assert.Equal("Processed", dto1.Data.Status);
         var id1 = dto1.Data.Id;
 
         // Upload second version (same candidate)
@@ -274,6 +274,10 @@ public class ResumeTestFactory : WebApplicationFactory<Program>, IDisposable
             if (storageDesc != null) services.Remove(storageDesc);
             services.AddSingleton<IFileStorage, LocalFileStorage>();
 
+            var pyDesc = services.SingleOrDefault(x => x.ServiceType == typeof(ResumeAnalysis.Api.Services.AI.IPythonAiService));
+            if (pyDesc != null) services.Remove(pyDesc);
+            services.AddSingleton<ResumeAnalysis.Api.Services.AI.IPythonAiService, CandidateMockPythonAiService>();
+
             Directory.CreateDirectory(_storagePath);
         });
     }
@@ -282,5 +286,39 @@ public class ResumeTestFactory : WebApplicationFactory<Program>, IDisposable
     {
         base.Dispose(disposing);
         try { if (Directory.Exists(_storagePath)) Directory.Delete(_storagePath, true); } catch { }
+    }
+}
+
+public class CandidateMockPythonAiService : ResumeAnalysis.Api.Services.AI.IPythonAiService
+{
+    public Task<string> AnalyzeResumeAsync(string pdfPath, string jobDescription, object? jobData, CancellationToken ct)
+    {
+        var response = """
+        {
+            "resume": { "skills": ["C#", "SQL"] },
+            "ats_result": {
+                "score": 85,
+                "breakdown": { "Formatting": 90, "Content": 80 },
+                "keywords_identified": ["ASP.NET", "EF Core"],
+                "missing_keywords": ["Docker"],
+                "missing_skills": ["Kubernetes"],
+                "issues": ["Too long"],
+                "recommendations": ["Shorten resume"]
+            },
+            "job_match": { "score": 85 },
+            "career_recommendations": []
+        }
+        """;
+        return Task.FromResult(response);
+    }
+
+    public Task<string> ChatAsync(string pdfPath, string message, object? conversation, CancellationToken ct)
+    {
+        return Task.FromResult("{\"answer\":\"mock answer\",\"conversation\":[]}");
+    }
+
+    public Task<string> StructureJobAsync(string rawJobDescription, CancellationToken ct)
+    {
+        return Task.FromResult("{}");
     }
 }

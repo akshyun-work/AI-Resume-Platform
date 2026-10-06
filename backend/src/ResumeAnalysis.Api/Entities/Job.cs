@@ -10,6 +10,7 @@ public class Job
     public string? EmploymentType { get; set; }
     public string? RequiredSkillsJson { get; set; }
     public string? PreferredSkillsJson { get; set; }
+    public string? StructuredJson { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

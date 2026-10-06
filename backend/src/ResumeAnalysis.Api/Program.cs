@@ -80,9 +80,11 @@ builder.Services.AddSwaggerGen(c =>
 
 // Config
 builder.Services.Configure<StorageSettings>(builder.Configuration.GetSection("Storage"));
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 
 // Services
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IResumeService, ResumeService>();
 builder.Services.AddScoped<IAtsService, AtsService>();

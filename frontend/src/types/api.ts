@@ -4,6 +4,7 @@ export interface Candidate {
     fullName: string;
     phone?: string | null;
     createdAt: string;
+    hasFaceRegistered?: boolean;
 }
 
 export interface AuthResponse {
@@ -52,6 +53,29 @@ export interface AtsAnalysis {
    Jobs
    ============================================================ */
 
+export interface StructuredJobDescription {
+    aboutCompany?: string;
+    teamAndRole?: string;
+    whyJoinUs?: string[];
+    cultureAndMindset?: string[];
+    responsibilities?: string[];
+    requiredSkills?: string[];
+    preferredSkills?: string[];
+    qualifications?: string[];
+    benefits?: string[];
+    howToApply?: {
+        email?: string;
+        url?: string;
+        instructions?: string;
+        deadline?: string;
+    };
+    additionalSections?: Array<{
+        title: string;
+        items?: string[];
+        content?: string;
+    }>;
+}
+
 export interface Job {
     id: string;
     title: string;
@@ -61,6 +85,7 @@ export interface Job {
     employmentType?: string | null;
     requiredSkills?: string[] | null;
     preferredSkills?: string[] | null;
+    structured?: StructuredJobDescription | null;
     isActive: boolean;
     createdAt: string;
     updatedAt: string;

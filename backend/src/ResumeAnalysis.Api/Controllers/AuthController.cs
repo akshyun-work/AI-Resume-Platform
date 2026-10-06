@@ -33,4 +33,34 @@ public class AuthController : ControllerBase
         var result = await _auth.LoginAsync(request, ct);
         return Ok(ApiResponse<AuthResponse>.Ok(result, "Login successful."));
     }
+
+    /// <summary>Request password reset OTP via email</summary>
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    [ProducesResponseType(typeof(ApiErrorResponse), 400)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken ct)
+    {
+        await _auth.ForgotPasswordAsync(request, ct);
+        return Ok(ApiResponse<bool>.Ok(true, "A 6-digit verification code has been sent to your email."));
+    }
+
+    /// <summary>Verify password reset OTP</summary>
+    [HttpPost("verify-otp")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    [ProducesResponseType(typeof(ApiErrorResponse), 400)]
+    public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request, CancellationToken ct)
+    {
+        var result = await _auth.VerifyOtpAsync(request, ct);
+        return Ok(ApiResponse<bool>.Ok(result, "Verification code is valid."));
+    }
+
+    /// <summary>Reset password using verified OTP</summary>
+    [HttpPost("reset-password")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    [ProducesResponseType(typeof(ApiErrorResponse), 400)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken ct)
+    {
+        await _auth.ResetPasswordAsync(request, ct);
+        return Ok(ApiResponse<bool>.Ok(true, "Password has been reset successfully. Please sign in with your new password."));
+    }
 }

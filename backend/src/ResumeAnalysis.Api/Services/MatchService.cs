@@ -108,6 +108,16 @@ public class MatchService : IMatchService
             Deserialize<List<string>>(job.PreferredSkillsJson)
             ?? new List<string>();
 
+        object? structuredObj = null;
+        if (!string.IsNullOrWhiteSpace(job.StructuredJson))
+        {
+            try
+            {
+                structuredObj = JsonSerializer.Deserialize<JsonElement>(job.StructuredJson);
+            }
+            catch { }
+        }
+
         var jobData = new
         {
             id = job.Id,
@@ -116,6 +126,9 @@ public class MatchService : IMatchService
             company = job.Company,
             location = job.Location,
             employment_type = job.EmploymentType,
+            required_skills = requiredSkills,
+            preferred_skills = preferredSkills,
+            structured = structuredObj,
 
             skills = requiredSkills
                 .Concat(preferredSkills)
@@ -318,6 +331,61 @@ public class MatchService : IMatchService
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+
+            // --------------------------------------------------------
+            // Synchronize ATS analysis for this resume & job
+            // --------------------------------------------------------
+
+            if (root.TryGetProperty("ats_result", out var atsResult) && atsResult.ValueKind == JsonValueKind.Object)
+            {
+                var atsScore = atsResult.TryGetProperty("score", out var sc) ? sc.GetInt32() : matchScore;
+
+                Dictionary<string, int>? categoryScores = null;
+                if (atsResult.TryGetProperty("breakdown", out var bd) && bd.ValueKind == JsonValueKind.Object)
+                {
+                    categoryScores = JsonSerializer.Deserialize<Dictionary<string, int>>(bd.GetRawText());
+                }
+
+                List<string>? skillsIdentified = null;
+                if (root.TryGetProperty("resume", out var rEl) && rEl.TryGetProperty("skills", out var sEl))
+                {
+                    skillsIdentified = JsonSerializer.Deserialize<List<string>>(sEl.GetRawText());
+                }
+
+                var atsIssues = new List<string>();
+                if (missingSkills != null && missingSkills.Count > 0)
+                {
+                    atsIssues.Add($"Missing required skills for {job.Title}: {string.Join(", ", missingSkills)}");
+                }
+                if (missingKeywords != null && missingKeywords.Count > 0)
+                {
+                    atsIssues.Add($"Missing job keywords: {string.Join(", ", missingKeywords)}");
+                }
+
+                var atsRecommendations = new List<string>();
+                if (missingSkills != null && missingSkills.Count > 0)
+                {
+                    atsRecommendations.Add($"Develop and highlight {string.Join(", ", missingSkills.Take(3))} on your resume to increase match score for {job.Title}.");
+                }
+
+                var atsEntity = new AtsAnalysis
+                {
+                    Id = Guid.NewGuid(),
+                    ResumeId = resume.Id,
+                    CandidateId = candidateId,
+                    OverallScore = Math.Clamp(atsScore, 0, 100),
+                    CategoryScoresJson = Serialize(categoryScores),
+                    SkillsIdentifiedJson = Serialize(skillsIdentified),
+                    KeywordsIdentifiedJson = Serialize(matchingKeywords ?? matchingSkills),
+                    MissingKeywordsJson = Serialize(missingKeywords),
+                    MissingSkillsJson = Serialize(missingSkills),
+                    IssuesJson = Serialize(atsIssues),
+                    RecommendationsJson = Serialize(atsRecommendations),
+                    AnalyzedAt = DateTime.UtcNow
+                };
+
+                _db.AtsAnalyses.Add(atsEntity);
+            }
 
             _db.MatchResults.Add(entity);
 

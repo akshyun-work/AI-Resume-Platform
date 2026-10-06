@@ -37,10 +37,18 @@ export const apiRequest = async <T>(
     }
 
     if (!response.ok) {
+        if (response.status === 401) {
+            if (!path.includes('/api/auth/')) {
+                clearAuth();
+                window.dispatchEvent(new CustomEvent('auth-expired'));
+                throw new Error('Your session has expired. Please log in again.');
+            }
+        }
+
         throw new Error(
             data?.message ||
             data?.Message ||
-            `Request failed with status ${response.status}`
+            (response.status === 401 ? 'Invalid email or password.' : `Request failed with status ${response.status}`)
         );
     }
 
@@ -113,4 +121,39 @@ export const clearAuth = () => {
     localStorage.removeItem(
         'authToken'
     );
+};
+
+export const fetchResumeBlob = async (resumeId: string): Promise<Blob> => {
+    const token = localStorage.getItem('authToken');
+    const headers = new Headers();
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/resumes/${resumeId}/view`, {
+        headers,
+    });
+
+    if (!response.ok) {
+        if (response.status === 401) {
+            clearAuth();
+            window.dispatchEvent(new CustomEvent('auth-expired'));
+            throw new Error('Your session has expired. Please log in again.');
+        }
+        throw new Error(`Unable to load resume PDF (Status ${response.status})`);
+    }
+
+    return await response.blob();
+};
+
+export const downloadResumePdf = async (resumeId: string, fileName = 'resume.pdf'): Promise<void> => {
+    const blob = await fetchResumeBlob(resumeId);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 };

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ResumeAnalysis.Api.Data;
 
@@ -11,9 +12,11 @@ using ResumeAnalysis.Api.Data;
 namespace ResumeAnalysis.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260915104304_AddJobStructuredJson")]
+    partial class AddJobStructuredJson
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -315,40 +318,6 @@ namespace ResumeAnalysis.Api.Migrations
                     b.HasIndex("CandidateId", "JobId", "ResumeId");
 
                     b.ToTable("MatchResults");
-                });
-
-            modelBuilder.Entity("ResumeAnalysis.Api.Entities.PasswordResetOtp", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsUsed")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Otp")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Email");
-
-                    b.HasIndex("Email", "IsUsed", "ExpiresAt");
-
-                    b.ToTable("PasswordResetOtps");
                 });
 
             modelBuilder.Entity("ResumeAnalysis.Api.Entities.Resume", b =>

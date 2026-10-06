@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import {
     Briefcase,
@@ -39,26 +39,64 @@ interface JobsResult {
 
 interface JobsProps {
     resumeId?: string;
+    initialSearch?: string;
     onBack: () => void;
     onMatchCreated: () => void;
+    onViewJob: (job: Job) => void;
 }
 
 interface JobAnalysisResponse {
     match_score?: number;
-    comparison?: {
+    score?: number;
+    keyword_score?: number;
+    semantic_score?: number;
+    job_match?: {
+        score?: number;
         matched_required?: string[];
         missing_required?: string[];
+        matched_preferred?: string[];
+        missing_preferred?: string[];
         matched_job_skills?: string[];
         missing_job_skills?: string[];
     };
-    gemini_analysis?: string;
+    comparison?: {
+        matched_required?: string[];
+        missing_required?: string[];
+        matched_preferred?: string[];
+        missing_preferred?: string[];
+        matched_job_skills?: string[];
+        missing_job_skills?: string[];
+    };
+    gemini_analysis?: {
+        match_summary?: string;
+        why_you_match?: string[];
+        resume_strengths?: Array<{ strength?: string; description?: string } | string>;
+        resume_weaknesses?: Array<{ weakness?: string; description?: string } | string>;
+        explanation_of_job_match?: {
+            score?: number;
+            summary?: string;
+            details?: string;
+        };
+        most_important_missing_skills?: {
+            critical?: string[];
+            beneficial?: string[];
+        };
+        prioritized_improvement_actions?: Array<{ action?: string; description?: string; timeframe?: string } | string>;
+        career_direction?: {
+            immediate_target?: string;
+            stronger_alignment?: string;
+        };
+        [key: string]: unknown;
+    } | string;
     [key: string]: unknown;
 }
 
 export const Jobs: React.FC<JobsProps> = ({
     resumeId,
+    initialSearch = '',
     onBack,
     onMatchCreated,
+    onViewJob,
 }) => {
     const [jobs, setJobs] = useState<Job[]>([]);
 
@@ -69,7 +107,7 @@ export const Jobs: React.FC<JobsProps> = ({
         useState<string | null>(null);
 
     const [search, setSearch] =
-        useState('');
+        useState(initialSearch);
 
     const [location, setLocation] =
         useState('');
@@ -81,9 +119,6 @@ export const Jobs: React.FC<JobsProps> = ({
         useState(0);
 
     const pageSize = 10;
-
-    const [selectedJob, setSelectedJob] =
-        useState<Job | null>(null);
 
     const [matchingJobId, setMatchingJobId] =
         useState<string | null>(null);
@@ -105,19 +140,21 @@ export const Jobs: React.FC<JobsProps> = ({
     // ============================================================
 
     const loadJobs = async (
-        requestedPage = page
+        requestedPage = page,
+        searchQuery?: string
     ) => {
         try {
             setLoading(true);
             setError(null);
 
+            const effectiveSearch = searchQuery !== undefined ? searchQuery : search;
             const params =
                 new URLSearchParams();
 
-            if (search.trim()) {
+            if (effectiveSearch.trim()) {
                 params.set(
                     'Search',
-                    search.trim()
+                    effectiveSearch.trim()
                 );
             }
 
@@ -187,8 +224,9 @@ export const Jobs: React.FC<JobsProps> = ({
     };
 
     useEffect(() => {
-        loadJobs(1);
-    }, []);
+        setSearch(initialSearch);
+        loadJobs(1, initialSearch);
+    }, [initialSearch]);
 
     const handleSearch = (
         event: React.FormEvent
@@ -315,9 +353,16 @@ export const Jobs: React.FC<JobsProps> = ({
                     );
                 }
 
-                setCustomAnalysis(
-                    response.data
-                );
+                let result = response.data;
+                if (typeof result === 'string') {
+                    try {
+                        result = JSON.parse(result);
+                    } catch {
+                        // ignore
+                    }
+                }
+
+                setCustomAnalysis(result);
 
             } catch (err) {
                 console.error(err);
@@ -542,104 +587,154 @@ export const Jobs: React.FC<JobsProps> = ({
 
                 {/* Custom analysis result */}
 
-                {customAnalysis && (
-                    <div className="mt-6 rounded-xl border border-indigo-500/20 bg-slate-950 p-5">
+                {customAnalysis && (() => {
+                    const score =
+                        customAnalysis.match_score ??
+                        customAnalysis.score ??
+                        customAnalysis.job_match?.score ??
+                        0;
 
-                        <div className="flex items-center justify-between gap-4">
+                    const matchedSkills =
+                        customAnalysis.comparison?.matched_required ||
+                        customAnalysis.comparison?.matched_job_skills ||
+                        customAnalysis.job_match?.matched_required ||
+                        customAnalysis.job_match?.matched_job_skills ||
+                        [];
 
-                            <div>
-                                <p className="text-xs uppercase tracking-wider text-slate-500">
-                                    Job Match Score
-                                </p>
+                    const missingSkills =
+                        customAnalysis.comparison?.missing_required ||
+                        customAnalysis.comparison?.missing_job_skills ||
+                        customAnalysis.job_match?.missing_required ||
+                        customAnalysis.job_match?.missing_job_skills ||
+                        [];
 
-                                <p className="mt-1 text-4xl font-black text-indigo-400">
-                                    {customAnalysis.match_score ??
-                                        '—'}
-                                    <span className="text-sm text-slate-500">
-                                        /100
-                                    </span>
-                                </p>
+                    const ga = customAnalysis.gemini_analysis;
+                    const isGaString = typeof ga === 'string';
+                    const gaObj = !isGaString && typeof ga === 'object' && ga !== null ? ga : null;
+                    const summary = gaObj ? (gaObj.match_summary || gaObj.explanation_of_job_match?.summary) : null;
+                    const strengths = gaObj
+                        ? (gaObj.why_you_match || (Array.isArray(gaObj.resume_strengths) ? gaObj.resume_strengths.map(s => typeof s === 'string' ? s : `${s.strength ? s.strength + ': ' : ''}${s.description || ''}`) : []))
+                        : [];
+                    const actions = gaObj && Array.isArray(gaObj.prioritized_improvement_actions)
+                        ? gaObj.prioritized_improvement_actions.map(a => typeof a === 'string' ? a : `${a.action ? a.action + ': ' : ''}${a.description || ''}`)
+                        : [];
+                    const immediateTarget = gaObj?.career_direction?.immediate_target;
+
+                    return (
+                        <div className="mt-6 rounded-xl border border-indigo-500/20 bg-slate-950 p-5">
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-xs uppercase tracking-wider text-slate-500">
+                                        Job Match Score
+                                    </p>
+                                    <p className="mt-1 text-4xl font-black text-indigo-400">
+                                        {score}
+                                        <span className="text-sm text-slate-500">
+                                            /100
+                                        </span>
+                                    </p>
+                                </div>
+
+                                <CheckCircle2
+                                    size={28}
+                                    className="text-emerald-400"
+                                />
                             </div>
 
-                            <CheckCircle2
-                                size={28}
-                                className="text-emerald-400"
-                            />
+                            {(matchedSkills.length > 0 || missingSkills.length > 0) && (
+                                <div className="mt-6 grid gap-5 md:grid-cols-2">
+                                    <div>
+                                        <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
+                                            Matching Skills ({matchedSkills.length})
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {matchedSkills.length > 0 ? (
+                                                matchedSkills.map((skill) => (
+                                                    <span
+                                                        key={skill}
+                                                        className="rounded-lg bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300"
+                                                    >
+                                                        {skill}
+                                                    </span>
+                                                ))
+                                            ) : (
+                                                <span className="text-xs text-slate-500 italic">None detected</span>
+                                            )}
+                                        </div>
+                                    </div>
 
+                                    <div>
+                                        <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
+                                            Missing Skills ({missingSkills.length})
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {missingSkills.length > 0 ? (
+                                                missingSkills.map((skill) => (
+                                                    <span
+                                                        key={skill}
+                                                        className="rounded-lg bg-rose-500/10 px-2 py-1 text-xs text-rose-300"
+                                                    >
+                                                        {skill}
+                                                    </span>
+                                                ))
+                                            ) : (
+                                                <span className="text-xs text-slate-500 italic">None missing</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {ga && (
+                                <div className="mt-6 border-t border-slate-800/80 pt-5">
+                                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
+                                        AI Match Analysis
+                                    </p>
+                                    {isGaString ? (
+                                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                            {ga}
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-4 text-sm leading-6 text-slate-300">
+                                            {summary && (
+                                                <p className="text-slate-300">{summary}</p>
+                                            )}
+                                            {strengths.length > 0 && (
+                                                <div>
+                                                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                                                        Key Strengths
+                                                    </p>
+                                                    <ul className="list-inside list-disc space-y-1 text-xs text-slate-300">
+                                                        {strengths.map((str, idx) => (
+                                                            <li key={idx}>{str}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {actions.length > 0 && (
+                                                <div>
+                                                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400">
+                                                        Recommended Next Steps
+                                                    </p>
+                                                    <ul className="list-inside list-disc space-y-1 text-xs text-slate-300">
+                                                        {actions.map((act, idx) => (
+                                                            <li key={idx}>{act}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {immediateTarget && (
+                                                <div className="rounded-lg border border-indigo-500/20 bg-indigo-950/40 p-3 text-xs text-indigo-200">
+                                                    <strong>Career Target Advice: </strong>{immediateTarget}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
-
-                        {customAnalysis.comparison && (
-                            <div className="mt-6 grid gap-5 md:grid-cols-2">
-
-                                <div>
-                                    <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
-                                        Matching Skills
-                                    </p>
-
-                                    <div className="flex flex-wrap gap-2">
-                                        {(
-                                            customAnalysis
-                                                .comparison
-                                                .matched_required ||
-                                            []
-                                        ).map(
-                                            (skill) => (
-                                                <span
-                                                    key={skill}
-                                                    className="rounded-lg bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300"
-                                                >
-                                                    {skill}
-                                                </span>
-                                            )
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
-                                        Missing Skills
-                                    </p>
-
-                                    <div className="flex flex-wrap gap-2">
-                                        {(
-                                            customAnalysis
-                                                .comparison
-                                                .missing_required ||
-                                            []
-                                        ).map(
-                                            (skill) => (
-                                                <span
-                                                    key={skill}
-                                                    className="rounded-lg bg-rose-500/10 px-2 py-1 text-xs text-rose-300"
-                                                >
-                                                    {skill}
-                                                </span>
-                                            )
-                                        )}
-                                    </div>
-                                </div>
-
-                            </div>
-                        )}
-
-                        {customAnalysis.gemini_analysis && (
-                            <div className="mt-6">
-
-                                <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
-                                    AI Analysis
-                                </p>
-
-                                <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                                    {
-                                        customAnalysis.gemini_analysis
-                                    }
-                                </p>
-
-                            </div>
-                        )}
-
-                    </div>
-                )}
+                    );
+                })()}
 
             </section>
 
@@ -682,9 +777,22 @@ export const Jobs: React.FC<JobsProps> = ({
                     </h3>
 
                     <p className="mt-2 text-sm text-slate-400">
-                        Try another title, company,
-                        skill, or location.
+                        {search ? `No jobs matched "${search}".` : 'No jobs available currently.'}
                     </p>
+
+                    {search && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSearch('');
+                                loadJobs(1, '');
+                            }}
+                            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500"
+                        >
+                            <RefreshCw size={14} />
+                            View All Available Jobs
+                        </button>
+                    )}
 
                 </div>
             ) : (
@@ -772,21 +880,12 @@ export const Jobs: React.FC<JobsProps> = ({
                                     )}
 
                                 <div className="mt-6 flex gap-3">
-
                                     <button
                                         type="button"
-                                        onClick={() =>
-                                            setSelectedJob(
-                                                selectedJob?.id === job.id
-                                                    ? null
-                                                    : job
-                                            )
-                                        }
-                                        className="flex-1 rounded-xl border border-slate-700 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-slate-800"
+                                        onClick={() => onViewJob(job)}
+                                        className="flex-1 rounded-xl border border-slate-700 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white"
                                     >
-                                        {selectedJob?.id === job.id
-                                            ? 'Hide Details'
-                                            : 'View Job'}
+                                        View Job Details
                                     </button>
 
                                     <button
@@ -818,22 +917,7 @@ export const Jobs: React.FC<JobsProps> = ({
                                             </>
                                         )}
                                     </button>
-
                                 </div>
-
-                                {selectedJob?.id === job.id && (
-                                    <div className="mt-5 border-t border-slate-800 pt-5">
-
-                                        <p className="text-xs uppercase tracking-wider text-slate-500">
-                                            Complete Job Description
-                                        </p>
-
-                                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                                            {job.description}
-                                        </p>
-
-                                    </div>
-                                )}
 
                             </div>
                         ))}

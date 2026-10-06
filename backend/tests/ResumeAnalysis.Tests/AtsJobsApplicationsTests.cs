@@ -69,14 +69,7 @@ public class AtsJobsApplicationsTests : IClassFixture<Phase3Factory>
         var create = new CreateAtsRequest
         {
             ResumeId = resumeId,
-            OverallScore = 85,
-            CategoryScores = new Dictionary<string,int>{{"Formatting",90},{"Content",80}},
-            SkillsIdentified = new List<string>{"C#","SQL"},
-            KeywordsIdentified = new List<string>{"ASP.NET","EF Core"},
-            MissingKeywords = new List<string>{"Docker"},
-            MissingSkills = new List<string>{"Kubernetes"},
-            Issues = new List<string>{"Too long"},
-            Recommendations = new List<string>{"Shorten resume"}
+            JobDescription = "Software Engineer with C# and SQL skills."
         };
         var resp = await clientA.PostAsJsonAsync("/api/ats", create);
         Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
@@ -97,29 +90,28 @@ public class AtsJobsApplicationsTests : IClassFixture<Phase3Factory>
         var latestBody = await latest.Content.ReadFromJsonAsync<ApiResponse<AtsAnalysisDto>>();
         Assert.Equal(analysisId, latestBody!.Data!.Id);
 
-        // History
+        // History (1 initial on upload + 1 from explicit create)
         var hist = await clientA.GetAsync($"/api/ats/resume/{resumeId}/history");
         Assert.Equal(HttpStatusCode.OK, hist.StatusCode);
         var histBody = await hist.Content.ReadFromJsonAsync<ApiResponse<List<AtsAnalysisDto>>>();
-        Assert.Single(histBody!.Data!);
+        Assert.Equal(2, histBody!.Data!.Count);
 
         // List for candidate
         var list = await clientA.GetAsync("/api/ats");
         Assert.Equal(HttpStatusCode.OK, list.StatusCode);
         var listBody = await list.Content.ReadFromJsonAsync<ApiResponse<List<AtsAnalysisDto>>>();
-        Assert.Single(listBody!.Data!);
+        Assert.Equal(2, listBody!.Data!.Count);
 
         // Create second analysis for same resume
-        create.OverallScore = 90;
         var resp2 = await clientA.PostAsJsonAsync("/api/ats", create);
         Assert.Equal(HttpStatusCode.Created, resp2.StatusCode);
         var hist2 = await clientA.GetAsync($"/api/ats/resume/{resumeId}/history");
         var hist2Body = await hist2.Content.ReadFromJsonAsync<ApiResponse<List<AtsAnalysisDto>>>();
-        Assert.Equal(2, hist2Body!.Data!.Count);
+        Assert.Equal(3, hist2Body!.Data!.Count);
         // Latest should be second
         var latest2 = await clientA.GetAsync($"/api/ats/resume/{resumeId}");
         var latest2Body = await latest2.Content.ReadFromJsonAsync<ApiResponse<AtsAnalysisDto>>();
-        Assert.Equal(90, latest2Body!.Data!.OverallScore);
+        Assert.Equal(85, latest2Body!.Data!.OverallScore);
 
         // Authorization: B cannot access A's analysis
         var getByB = await clientB.GetAsync($"/api/ats/{analysisId}");
@@ -128,14 +120,9 @@ public class AtsJobsApplicationsTests : IClassFixture<Phase3Factory>
         Assert.Equal(HttpStatusCode.Unauthorized, latestByB.StatusCode);
 
         // Invalid resume -> 404
-        var badCreate = new CreateAtsRequest { ResumeId = Guid.NewGuid(), OverallScore = 50 };
+        var badCreate = new CreateAtsRequest { ResumeId = Guid.NewGuid() };
         var badResp = await clientA.PostAsJsonAsync("/api/ats", badCreate);
         Assert.Equal(HttpStatusCode.NotFound, badResp.StatusCode);
-
-        // Invalid score -> 400
-        var invalidScore = new CreateAtsRequest { ResumeId = resumeId, OverallScore = 150 };
-        var invalidResp = await clientA.PostAsJsonAsync("/api/ats", invalidScore);
-        Assert.Equal(HttpStatusCode.BadRequest, invalidResp.StatusCode);
 
         // Unauthenticated -> 401
         var anon = _factory.CreateClient();
@@ -345,6 +332,11 @@ public class Phase3Factory : WebApplicationFactory<Program>, IDisposable
             var storageDesc = services.SingleOrDefault(x => x.ServiceType == typeof(IFileStorage));
             if (storageDesc != null) services.Remove(storageDesc);
             services.AddSingleton<IFileStorage, LocalFileStorage>();
+
+            var pyDesc = services.SingleOrDefault(x => x.ServiceType == typeof(ResumeAnalysis.Api.Services.AI.IPythonAiService));
+            if (pyDesc != null) services.Remove(pyDesc);
+            services.AddSingleton<ResumeAnalysis.Api.Services.AI.IPythonAiService, Phase3MockPythonAiService>();
+
             Directory.CreateDirectory(_storagePath);
         });
     }
@@ -352,5 +344,52 @@ public class Phase3Factory : WebApplicationFactory<Program>, IDisposable
     {
         base.Dispose(disposing);
         try { if (Directory.Exists(_storagePath)) Directory.Delete(_storagePath, true); } catch { }
+    }
+}
+
+public class Phase3MockPythonAiService : ResumeAnalysis.Api.Services.AI.IPythonAiService
+{
+    public Task<string> AnalyzeResumeAsync(string pdfPath, string jobDescription, object? jobData, CancellationToken ct)
+    {
+        var response = """
+        {
+            "resume": { "skills": ["C#", "SQL"] },
+            "ats_result": {
+                "score": 85,
+                "breakdown": { "Formatting": 90, "Content": 80 },
+                "keywords_identified": ["ASP.NET", "EF Core"],
+                "missing_keywords": ["Docker"],
+                "missing_skills": ["Kubernetes"],
+                "issues": ["Too long"],
+                "recommendations": ["Shorten resume"]
+            },
+            "job_match": { "score": 85 },
+            "comparison": {
+                "matched_required": ["C#"],
+                "missing_required": ["Kubernetes"],
+                "matched_job_skills": ["ASP.NET"],
+                "missing_job_skills": ["Docker"]
+            },
+            "gemini_analysis": {
+                "match_summary": "Strong candidate match.",
+                "why_you_match": ["C#", "ASP.NET"],
+                "what_is_missing": { "required": ["Kubernetes"], "preferred": [], "job_specific": ["Docker"] },
+                "score_explanation": { "score": 85, "explanation": "Demonstrates strong foundational qualifications.", "factors": [] },
+                "improvement_actions": ["Learn Kubernetes"]
+            },
+            "career_recommendations": []
+        }
+        """;
+        return Task.FromResult(response);
+    }
+
+    public Task<string> ChatAsync(string pdfPath, string message, object? conversation, CancellationToken ct)
+    {
+        return Task.FromResult("""{"answer": "Phase3 chatbot test answer", "conversation": []}""");
+    }
+
+    public Task<string> StructureJobAsync(string rawJobDescription, CancellationToken ct)
+    {
+        return Task.FromResult("{}");
     }
 }

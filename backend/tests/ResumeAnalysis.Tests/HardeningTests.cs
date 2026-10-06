@@ -200,8 +200,61 @@ public class HardeningFactory : WebApplicationFactory<Program>, IDisposable
             services.Configure<StorageSettings>(o=>{o.Path=_storagePath; o.MaxFileSizeBytes=5*1024*1024; o.AllowedExtensions=new[]{".pdf"}; o.AllowedContentTypes=new[]{"application/pdf"};});
             var sd=services.SingleOrDefault(x=>x.ServiceType==typeof(IFileStorage)); if(sd!=null) services.Remove(sd);
             services.AddSingleton<IFileStorage, LocalFileStorage>();
+
+            var pyDesc = services.SingleOrDefault(x => x.ServiceType == typeof(ResumeAnalysis.Api.Services.AI.IPythonAiService));
+            if (pyDesc != null) services.Remove(pyDesc);
+            services.AddSingleton<ResumeAnalysis.Api.Services.AI.IPythonAiService, HardeningMockPythonAiService>();
+
             Directory.CreateDirectory(_storagePath);
         });
     }
     protected override void Dispose(bool disposing){ base.Dispose(disposing); try{if(Directory.Exists(_storagePath)) Directory.Delete(_storagePath,true);}catch{}}
+}
+
+public class HardeningMockPythonAiService : ResumeAnalysis.Api.Services.AI.IPythonAiService
+{
+    public Task<string> AnalyzeResumeAsync(string pdfPath, string jobDescription, object? jobData, CancellationToken ct)
+    {
+        var response = """
+        {
+            "resume": { "skills": ["C#", "SQL"] },
+            "ats_result": {
+                "score": 85,
+                "breakdown": { "Formatting": 90, "Content": 80 },
+                "keywords_identified": ["ASP.NET", "EF Core"],
+                "missing_keywords": ["Docker"],
+                "missing_skills": ["Kubernetes"],
+                "issues": ["Too long"],
+                "recommendations": ["Shorten resume"]
+            },
+            "job_match": { "score": 85 },
+            "match_score": 85,
+            "comparison": {
+                "matched_required": ["C#"],
+                "missing_required": ["Kubernetes"],
+                "matched_job_skills": ["ASP.NET"],
+                "missing_job_skills": ["Docker"]
+            },
+            "gemini_analysis": {
+                "match_summary": "Strong candidate match.",
+                "why_you_match": ["C#", "ASP.NET"],
+                "what_is_missing": { "required": ["Kubernetes"], "preferred": [], "job_specific": ["Docker"] },
+                "score_explanation": { "score": 85, "explanation": "Demonstrates strong foundational qualifications.", "factors": [] },
+                "improvement_actions": ["Learn Kubernetes"]
+            },
+            "career_recommendations": []
+        }
+        """;
+        return Task.FromResult(response);
+    }
+
+    public Task<string> ChatAsync(string pdfPath, string message, object? conversation, CancellationToken ct)
+    {
+        return Task.FromResult("""{"answer": "Test answer from AI assistant.", "conversation": []}""");
+    }
+
+    public Task<string> StructureJobAsync(string rawJobDescription, CancellationToken ct)
+    {
+        return Task.FromResult("{}");
+    }
 }

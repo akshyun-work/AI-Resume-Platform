@@ -135,8 +135,17 @@ def analyze_job(job_text, job_data=None):
     Convert raw job description into structured information.
 
     job_data is optional and may contain structured information
-    returned by the external job API.
+    returned by the database or Gemini structuring engine.
     """
+    structured_data = None
+    if job_data:
+        if isinstance(job_data.get("structured"), dict):
+            structured_data = job_data.get("structured")
+        elif isinstance(job_data.get("structured"), str):
+            try:
+                structured_data = json.loads(job_data["structured"])
+            except Exception:
+                pass
 
     sections = extract_job_sections(job_text)
 
@@ -144,113 +153,70 @@ def analyze_job(job_text, job_data=None):
     preferred_text = sections["preferred"]
     responsibilities_text = sections["responsibilities"]
 
-    # ---------------------------------------------------------
-    # Use structured requirements from the Job API when
-    # available.
-    # ---------------------------------------------------------
+    structured_required_skills = []
+    structured_preferred_skills = []
 
-    if job_data:
+    if structured_data:
+        # Use structured responsibilities
+        struct_resps = structured_data.get("responsibilities")
+        if struct_resps and isinstance(struct_resps, list):
+            responsibilities_text = " ".join(str(r) for r in struct_resps)
 
-        requirements = job_data.get(
-            "requirements",
-            []
-        )
+        # Use structured qualifications
+        struct_quals = structured_data.get("qualifications")
+        if struct_quals and isinstance(struct_quals, list):
+            required_text = (required_text + " " + " ".join(str(q) for q in struct_quals)).strip()
 
-        structured_required = []
+        # Extract structured skills
+        struct_req = structured_data.get("requiredSkills") or structured_data.get("required_skills")
+        if struct_req and isinstance(struct_req, list):
+            structured_required_skills = [str(s).strip() for s in struct_req if str(s).strip()]
 
-        for requirement in requirements:
+        struct_pref = structured_data.get("preferredSkills") or structured_data.get("preferred_skills")
+        if struct_pref and isinstance(struct_pref, list):
+            structured_preferred_skills = [str(s).strip() for s in struct_pref if str(s).strip()]
 
-            if isinstance(requirement, dict):
+    # Also check direct job_data fields
+    if job_data and not structured_required_skills:
+        req_list = job_data.get("required_skills")
+        if req_list and isinstance(req_list, list):
+            structured_required_skills = [str(s).strip() for s in req_list if str(s).strip()]
 
-                text = requirement.get(
-                    "text",
-                    ""
-                )
+    if job_data and not structured_preferred_skills:
+        pref_list = job_data.get("preferred_skills")
+        if pref_list and isinstance(pref_list, list):
+            structured_preferred_skills = [str(s).strip() for s in pref_list if str(s).strip()]
 
-                priority = requirement.get(
-                    "priority",
-                    ""
-                )
-
-                if text:
-                    if priority.lower() == "required":
-                        structured_required.append(text)
-
-            elif isinstance(requirement, str):
-
-                structured_required.append(
-                    requirement
-                )
-
-        if structured_required:
-
-            required_text = " ".join(
-                structured_required
-            )
-
-    # ---------------------------------------------------------
-    # If the job description has no explicit responsibilities
-    # section, use the complete description for semantic
-    # analysis.
-    # ---------------------------------------------------------
-
+    # If the job description has no explicit responsibilities section, use complete description
     if not responsibilities_text.strip():
-
         responsibilities_text = job_text
 
-    # ---------------------------------------------------------
-    # Extract skills
-    # ---------------------------------------------------------
+    # Extract skills via dictionary regex
+    extracted_req = extract_skills(required_text)
+    extracted_pref = extract_skills(preferred_text)
+    responsibility_skills = extract_skills(responsibilities_text)
 
-    required_skills = extract_skills(
-        required_text
-    )
+    # Combine structured skills with extracted dictionary skills
+    required_skills = list(dict.fromkeys(structured_required_skills + extracted_req))
+    preferred_skills = list(dict.fromkeys(structured_preferred_skills + extracted_pref))
 
-    preferred_skills = extract_skills(
-        preferred_text
-    )
-
-    responsibility_skills = extract_skills(
-        responsibilities_text
-    )
-
-    # If no explicit required/preferred section exists,
-    # treat skills detected from the complete job description
-    # as required job skills.
+    # If no required/preferred skills found at all, fall back to responsibility skills
     if not required_skills and not preferred_skills:
         required_skills = responsibility_skills.copy()
 
-        # ---------------------------------------------------------
-    # FreeHire provides a structured list of job skills.
-    # These are useful even when the listing does not provide
-    # explicit required/preferred requirements.
-    # ---------------------------------------------------------
-
+    # External API skills
     api_skills = []
-
     if job_data:
-        api_skills = job_data.get(
-            "skills",
-            []
-        )
-
-        if not isinstance(api_skills, list):
-            api_skills = []
-
-        api_skills = [
-            skill
-            for skill in api_skills
-            if isinstance(skill, str)
-            and skill.strip()
-        ]
-    # Include skills mentioned in responsibilities
-    # as additional job-related skills.
+        raw_api_skills = job_data.get("skills", [])
+        if isinstance(raw_api_skills, list):
+            api_skills = [str(s).strip() for s in raw_api_skills if isinstance(s, str) and s.strip()]
 
     all_job_skills = list(
         dict.fromkeys(
             required_skills
             + preferred_skills
             + responsibility_skills
+            + api_skills
         )
     )
 

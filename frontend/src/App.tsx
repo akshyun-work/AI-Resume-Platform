@@ -10,6 +10,8 @@ import {
     Briefcase,
     Target,
     MessageCircle,
+    Eye,
+    Sparkles,
 } from 'lucide-react';
 
 import { Login } from './components/Login';
@@ -18,8 +20,10 @@ import { ResumeUpload } from './components/ResumeUpload';
 import { ATSScorecard } from './components/ATSScorecard';
 import { Profile } from './components/Profile';
 import { Jobs } from './components/Jobs';
+import { JobDetail } from './components/JobDetail';
 import { Matches } from './components/Matches';
 import { ResumeChat } from './components/ResumeChat';
+import { ResumePdfModal } from './components/ResumePdfModal';
 
 import {
     apiRequest,
@@ -32,6 +36,8 @@ import type {
     AtsAnalysis,
     Candidate,
     Resume,
+    MatchResult,
+    Job,
 } from './types/api';
 
 type Page =
@@ -40,6 +46,7 @@ type Page =
     | 'results'
     | 'profile'
     | 'jobs'
+    | 'job-details'
     | 'matches'
     | 'chat';
 
@@ -62,8 +69,20 @@ function App() {
     const [analysis, setAnalysis] =
         useState<AtsAnalysis | null>(null);
 
+    const [latestMatch, setLatestMatch] =
+        useState<MatchResult | null>(null);
+
+    const [selectedJobForDetails, setSelectedJobForDetails] =
+        useState<Job | null>(null);
+
+    const [jobSearchFilter, setJobSearchFilter] =
+        useState('');
+
     const [loading, setLoading] =
         useState(false);
+
+    const [previewResumeId, setPreviewResumeId] =
+        useState<string | null>(null);
 
     const [error, setError] =
         useState<string | null>(null);
@@ -106,49 +125,84 @@ function App() {
             // Latest resume
             // ----------------------------------------------------
 
-            const resumeResponse =
-                await apiRequest<
-                    ApiResponse<Resume | null>
-                >('/api/resumes/latest');
+            try {
+                const resumeResponse =
+                    await apiRequest<
+                        ApiResponse<Resume | null>
+                    >('/api/resumes/latest');
 
-            if (
-                resumeResponse.success &&
-                resumeResponse.data
-            ) {
-                const resume =
-                    resumeResponse.data;
+                if (
+                    resumeResponse.success &&
+                    resumeResponse.data
+                ) {
+                    const resume =
+                        resumeResponse.data;
 
-                setLatestResume(resume);
+                    setLatestResume(resume);
 
-                // ------------------------------------------------
-                // Latest ATS analysis
-                // ------------------------------------------------
+                    // ------------------------------------------------
+                    // Latest ATS analysis
+                    // ------------------------------------------------
 
-                try {
-                    const analysisResponse =
-                        await apiRequest<
-                            ApiResponse<AtsAnalysis>
-                        >(
-                            `/api/ats/resume/${resume.id}`
-                        );
+                    try {
+                        const analysisResponse =
+                            await apiRequest<
+                                ApiResponse<AtsAnalysis>
+                            >(
+                                `/api/ats/resume/${resume.id}`
+                            );
 
-                    if (
-                        analysisResponse.success &&
-                        analysisResponse.data
-                    ) {
-                        setAnalysis(
+                        if (
+                            analysisResponse.success &&
                             analysisResponse.data
-                        );
-                    } else {
+                        ) {
+                            setAnalysis(
+                                analysisResponse.data
+                            );
+                        } else {
+                            setAnalysis(null);
+                        }
+                    } catch {
+                        // No ATS analysis is a valid state.
                         setAnalysis(null);
                     }
-                } catch {
-                    // No ATS analysis is a valid state.
+
+                    // ------------------------------------------------
+                    // Latest Job Match
+                    // ------------------------------------------------
+
+                    try {
+                        const matchResponse =
+                            await apiRequest<
+                                ApiResponse<MatchResult[]>
+                            >(
+                                `/api/matches/resume/${resume.id}`
+                            );
+
+                        if (
+                            matchResponse.success &&
+                            matchResponse.data &&
+                            matchResponse.data.length > 0
+                        ) {
+                            setLatestMatch(
+                                matchResponse.data[0]
+                            );
+                        } else {
+                            setLatestMatch(null);
+                        }
+                    } catch {
+                        setLatestMatch(null);
+                    }
+                } else {
+                    setLatestResume(null);
                     setAnalysis(null);
+                    setLatestMatch(null);
                 }
-            } else {
+            } catch {
+                // If candidate has no resumes yet, it's a normal empty state
                 setLatestResume(null);
                 setAnalysis(null);
+                setLatestMatch(null);
             }
         } catch (err) {
             setError(
@@ -161,12 +215,13 @@ function App() {
         }
     };
     // ============================================================
-    // Refresh latest ATS analysis
+    // Refresh latest ATS analysis & Matches
     // ============================================================
 
     const refreshLatestAnalysis = async () => {
         if (!latestResume?.id) {
             setAnalysis(null);
+            setLatestMatch(null);
             return;
         }
 
@@ -174,18 +229,35 @@ function App() {
             setLoading(true);
             setError(null);
 
-            const analysisResponse =
-                await apiRequest<ApiResponse<AtsAnalysis>>(
-                    `/api/ats/resume/${latestResume.id}`
-                );
+            const [analysisResponse, matchResponse] =
+                await Promise.allSettled([
+                    apiRequest<ApiResponse<AtsAnalysis>>(
+                        `/api/ats/resume/${latestResume.id}`
+                    ),
+                    apiRequest<ApiResponse<MatchResult[]>>(
+                        `/api/matches/resume/${latestResume.id}`
+                    ),
+                ]);
 
             if (
-                analysisResponse.success &&
-                analysisResponse.data
+                analysisResponse.status === 'fulfilled' &&
+                analysisResponse.value.success &&
+                analysisResponse.value.data
             ) {
-                setAnalysis(analysisResponse.data);
+                setAnalysis(analysisResponse.value.data);
             } else {
                 setAnalysis(null);
+            }
+
+            if (
+                matchResponse.status === 'fulfilled' &&
+                matchResponse.value.success &&
+                matchResponse.value.data &&
+                matchResponse.value.data.length > 0
+            ) {
+                setLatestMatch(matchResponse.value.data[0]);
+            } else {
+                setLatestMatch(null);
             }
         } catch (err) {
             setError(
@@ -197,6 +269,73 @@ function App() {
             setLoading(false);
         }
     };
+
+    // ============================================================
+    // Analyze Match directly from Job Detail page
+    // ============================================================
+
+    const handleAnalyzeMatchFromDetail = async (job: Job) => {
+        if (!latestResume?.id) {
+            setError('Please upload a resume first.');
+            return;
+        }
+
+        const response = await apiRequest<ApiResponse<MatchResult>>(
+            '/api/matches',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    resumeId: latestResume.id,
+                    jobId: job.id,
+                }),
+            }
+        );
+
+        if (!response.success || !response.data) {
+            throw new Error(
+                response.message || 'Unable to analyze match for this role.'
+            );
+        }
+
+        await refreshLatestAnalysis();
+        setPage('matches');
+    };
+
+    // ============================================================
+    // Handle Direct Job View by ID
+    // ============================================================
+
+    const handleViewJobById = async (jobId: string) => {
+        try {
+            setLoading(true);
+            const response = await apiRequest<ApiResponse<Job>>(`/api/jobs/${jobId}`);
+            if (response.success && response.data) {
+                setSelectedJobForDetails(response.data);
+                setPage('job-details');
+            } else {
+                setPage('jobs');
+            }
+        } catch (err) {
+            console.error('Failed to load job details:', err);
+            setPage('jobs');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ============================================================
+    // Handle Clicking on a Recommended Role in ATS Scorecard
+    // ============================================================
+
+    const handleSelectRecommendedRole = (role: string) => {
+        // Use primary keyword if role is compound to maximize catalog match rate
+        setJobSearchFilter(role);
+        setPage('jobs');
+    };
+
     // ============================================================
     // Load data after authentication
     // ============================================================
@@ -206,6 +345,20 @@ function App() {
             loadCandidateData();
         }
     }, [authenticated]);
+
+    useEffect(() => {
+        const handleAuthExpired = () => {
+            setAuthenticated(false);
+            setCandidate(null);
+            setLatestResume(null);
+            setAnalysis(null);
+            setLatestMatch(null);
+            setError('Your session has expired. Please log in again.');
+        };
+
+        window.addEventListener('auth-expired', handleAuthExpired);
+        return () => window.removeEventListener('auth-expired', handleAuthExpired);
+    }, []);
 
     // ============================================================
     // Login
@@ -344,6 +497,36 @@ function App() {
                 {loading && (
                     <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400">
                         Loading your data...
+                    </div>
+                )}
+
+                {/* Green Onboarding Card when no resume is uploaded yet */}
+                {!latestResume && !loading && (
+                    <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-emerald-300 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-3.5">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
+                                <Sparkles size={20} />
+                            </div>
+                            <div>
+                                <p className="font-semibold text-emerald-200">
+                                    Upload your resume to get resume analysis
+                                </p>
+                                <p className="mt-0.5 text-xs text-emerald-400/80">
+                                    Upload your PDF resume to generate your instant ATS scorecard, matching job recommendations, and AI insights.
+                                </p>
+                            </div>
+                        </div>
+
+                        {page !== 'upload' && (
+                            <button
+                                type="button"
+                                onClick={() => setPage('upload')}
+                                className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition shadow-md"
+                            >
+                                <Upload size={14} />
+                                Upload Resume
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -542,7 +725,16 @@ function App() {
 
                                     </div>
 
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setPreviewResumeId(latestResume.id)}
+                                            className="flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-600/15 px-4 py-2 text-sm font-semibold text-indigo-300 transition hover:bg-indigo-600 hover:text-white"
+                                        >
+                                            <Eye size={15} />
+                                            View PDF
+                                        </button>
 
                                         <button
                                             onClick={async () => {
@@ -610,13 +802,21 @@ function App() {
                                 analysis.skillsIdentified || []
                             }
                             keywords={
-                                analysis.keywordsIdentified || []
+                                analysis.keywordsIdentified && analysis.keywordsIdentified.length > 0
+                                    ? analysis.keywordsIdentified
+                                    : (latestMatch?.matchingKeywords && latestMatch.matchingKeywords.length > 0
+                                        ? latestMatch.matchingKeywords
+                                        : (analysis.skillsIdentified || []))
                             }
                             missingKeywords={
-                                analysis.missingKeywords || []
+                                analysis.missingKeywords && analysis.missingKeywords.length > 0
+                                    ? analysis.missingKeywords
+                                    : (latestMatch?.missingKeywords || [])
                             }
                             missingSkills={
-                                analysis.missingSkills || []
+                                analysis.missingSkills && analysis.missingSkills.length > 0
+                                    ? analysis.missingSkills
+                                    : (latestMatch?.missingSkills || [])
                             }
                             issues={
                                 analysis.issues || []
@@ -634,6 +834,20 @@ function App() {
                                 candidate?.phone
                             }
                             analyzedAt={analysis.analyzedAt}
+                            targetJobTitle={latestMatch?.jobTitle}
+                            targetCompany={latestMatch?.company}
+                            targetJobId={latestMatch?.jobId}
+                            onSelectRole={handleSelectRecommendedRole}
+                            onViewJob={(job) => {
+                                setSelectedJobForDetails(job);
+                                setPage('job-details');
+                            }}
+                            onViewJobById={handleViewJobById}
+                            onViewResume={() =>
+                                setPreviewResumeId(
+                                    latestResume?.id || null
+                                )
+                            }
                             onBack={() =>
                                 setPage('dashboard')
                             }
@@ -673,14 +887,34 @@ function App() {
                 ================================================= */}
 
                 {page === 'jobs' && (
-                <Jobs
-                    resumeId={latestResume?.id}
-                    onBack={() =>
-                        setPage('dashboard')
-                    }
-                    onMatchCreated={() =>
-                        setPage('matches')
-                    }
+                    <Jobs
+                        resumeId={latestResume?.id}
+                        initialSearch={jobSearchFilter}
+                        onBack={() => {
+                            setJobSearchFilter('');
+                            setPage('dashboard');
+                        }}
+                        onViewJob={(job) => {
+                            setSelectedJobForDetails(job);
+                            setPage('job-details');
+                        }}
+                        onMatchCreated={async () => {
+                            await refreshLatestAnalysis();
+                            setPage('matches');
+                        }}
+                    />
+                )}
+
+                {/* =================================================
+                    Job Details
+                ================================================= */}
+
+                {page === 'job-details' && selectedJobForDetails && (
+                    <JobDetail
+                        job={selectedJobForDetails}
+                        resumeId={latestResume?.id}
+                        onBack={() => setPage('jobs')}
+                        onAnalyzeMatch={handleAnalyzeMatchFromDetail}
                     />
                 )}
 
@@ -693,6 +927,7 @@ function App() {
                         resumeId={
                             latestResume?.id
                         }
+                        onViewJobById={handleViewJobById}
                         onBack={() =>
                             setPage('dashboard')
                         }
@@ -707,6 +942,11 @@ function App() {
                     <ResumeChat
                         resumeId={
                             latestResume?.id
+                        }
+                        onViewResume={() =>
+                            setPreviewResumeId(
+                                latestResume?.id || null
+                            )
                         }
                         onBack={() =>
                             setPage('dashboard')
@@ -727,6 +967,17 @@ function App() {
                             }
                         />
                     )}
+
+                {/* =================================================
+                    Resume PDF Preview Modal
+                ================================================= */}
+
+                {previewResumeId && (
+                    <ResumePdfModal
+                        initialResumeId={previewResumeId}
+                        onClose={() => setPreviewResumeId(null)}
+                    />
+                )}
 
             </main>
         </div>

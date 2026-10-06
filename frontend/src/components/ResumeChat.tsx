@@ -1,10 +1,12 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Bot,
     Send,
     Loader2,
     User,
     AlertCircle,
+    Eye,
+    FileText,
 } from 'lucide-react';
 
 import { apiRequest } from '../services/api';
@@ -40,11 +42,13 @@ interface ResumeChatResponse {
 interface ResumeChatProps {
     resumeId?: string;
     onBack: () => void;
+    onViewResume?: () => void;
 }
 
 export const ResumeChat: React.FC<ResumeChatProps> = ({
     resumeId,
     onBack,
+    onViewResume,
 }) => {
     const [session, setSession] =
         useState<ChatSession | null>(null);
@@ -269,24 +273,37 @@ export const ResumeChat: React.FC<ResumeChatProps> = ({
             ) : (
                 <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
 
-                    <div className="flex items-center gap-3 border-b border-slate-800 p-5">
-                        <div className="rounded-xl bg-indigo-500/10 p-2">
-                            <Bot
-                                size={22}
-                                className="text-indigo-400"
-                            />
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 p-5">
+                        <div className="flex items-center gap-3">
+                            <div className="rounded-xl bg-indigo-500/10 p-2">
+                                <Bot
+                                    size={22}
+                                    className="text-indigo-400"
+                                />
+                            </div>
+
+                            <div>
+                                <h3 className="font-bold text-white">
+                                    Resume Assistant
+                                </h3>
+
+                                <p className="text-xs text-slate-500">
+                                    {session?.title ||
+                                        'Resume Chat'}
+                                </p>
+                            </div>
                         </div>
 
-                        <div>
-                            <h3 className="font-bold text-white">
-                                Resume Assistant
-                            </h3>
-
-                            <p className="text-xs text-slate-500">
-                                {session?.title ||
-                                    'Resume Chat'}
-                            </p>
-                        </div>
+                        {onViewResume && (
+                            <button
+                                type="button"
+                                onClick={onViewResume}
+                                className="flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-600/15 px-3.5 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-600 hover:text-white"
+                            >
+                                <Eye size={14} />
+                                View Resume PDF
+                            </button>
+                        )}
                     </div>
 
                     <div className="min-h-[450px] max-h-[550px] space-y-5 overflow-y-auto p-5">

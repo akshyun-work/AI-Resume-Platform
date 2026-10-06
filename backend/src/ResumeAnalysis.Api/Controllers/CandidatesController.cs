@@ -32,7 +32,8 @@ public class CandidatesController : ControllerBase
         var id = User.GetCandidateId();
         var c = await _db.Candidates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c == null) return NotFound(ApiResponse<CandidateDto>.Fail("Candidate not found."));
-        var dto = new CandidateDto { Id = c.Id, Email = c.Email, FullName = c.FullName, Phone = c.Phone, CreatedAt = c.CreatedAt };
+        var hasFace = await _db.FaceEmbeddings.AnyAsync(f => f.CandidateId == id, ct);
+        var dto = new CandidateDto { Id = c.Id, Email = c.Email, FullName = c.FullName, Phone = c.Phone, CreatedAt = c.CreatedAt, HasFaceRegistered = hasFace };
         return Ok(ApiResponse<CandidateDto>.Ok(dto));
     }
 
@@ -55,7 +56,26 @@ public class CandidatesController : ControllerBase
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Candidate updated {CandidateId}", id);
 
-        var dto = new CandidateDto { Id = c.Id, Email = c.Email, FullName = c.FullName, Phone = c.Phone, CreatedAt = c.CreatedAt };
+        var hasFace = await _db.FaceEmbeddings.AnyAsync(f => f.CandidateId == id, ct);
+        var dto = new CandidateDto { Id = c.Id, Email = c.Email, FullName = c.FullName, Phone = c.Phone, CreatedAt = c.CreatedAt, HasFaceRegistered = hasFace };
         return Ok(ApiResponse<CandidateDto>.Ok(dto, "Profile updated."));
+    }
+
+    /// <summary>Delete Face ID registration for current candidate</summary>
+    [HttpDelete("me/face")]
+    [ProducesResponseType(typeof(ApiResponse<object>), 200)]
+    [ProducesResponseType(typeof(ApiErrorResponse), 401)]
+    public async Task<IActionResult> DeleteFace(CancellationToken ct)
+    {
+        var id = User.GetCandidateId();
+        var face = await _db.FaceEmbeddings.FirstOrDefaultAsync(f => f.CandidateId == id, ct);
+        if (face != null)
+        {
+            _db.FaceEmbeddings.Remove(face);
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("Face ID removed for candidate {CandidateId}", id);
+        }
+
+        return Ok(ApiResponse<object>.Ok(new { }, "Face ID removed successfully."));
     }
 }

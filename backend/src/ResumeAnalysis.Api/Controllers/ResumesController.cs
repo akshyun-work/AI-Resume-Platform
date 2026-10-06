@@ -86,13 +86,19 @@ public class ResumesController : ControllerBase
                 ApiResponse<object>.Fail("Job description is required."));
 
         var candidateId = User.GetCandidateId();
-
-        var result = await _service.AnalyzeAsync(
+        var rawResult = await _service.AnalyzeAsync(
             candidateId,
             id,
             request.JobDescription,
             request.JobData,
             ct);
+
+        object result = rawResult;
+        try
+        {
+            result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rawResult);
+        }
+        catch { }
 
         return Ok(
             ApiResponse<object>.Ok(
@@ -109,6 +115,18 @@ public class ResumesController : ControllerBase
         var candidateId = User.GetCandidateId();
         var (stream, contentType, fileName) = await _service.DownloadAsync(candidateId, id, ct);
         return File(stream, contentType, fileName);
+    }
+
+    /// <summary>View/preview resume PDF inline in browser</summary>
+    [HttpGet("{id:guid}/view")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(typeof(ApiErrorResponse), 404)]
+    public async Task<IActionResult> View(Guid id, CancellationToken ct)
+    {
+        var candidateId = User.GetCandidateId();
+        var (stream, contentType, fileName) = await _service.DownloadAsync(candidateId, id, ct);
+        Response.Headers.Append("Content-Disposition", $"inline; filename=\"{fileName}\"");
+        return File(stream, contentType ?? "application/pdf");
     }
 
     /// <summary>Delete resume</summary>

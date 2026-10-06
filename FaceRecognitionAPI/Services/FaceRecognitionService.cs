@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using FaceRecognitionAPI.Data;
 using FaceRecognitionAPI.Models.DTOs;
 using Microsoft.EntityFrameworkCore;
@@ -136,40 +136,48 @@ public class FaceRecognitionService
             await _pythonFaceService
                 .GenerateEmbeddingAsync(request.Image);
 
-        var existingRegistration =
-            await _context.FaceEmbeddings
-                .AnyAsync(f =>
-                    f.CandidateId == request.CandidateId);
-
-        if (existingRegistration)
-        {
-            throw new InvalidOperationException(
-                "This candidate already has a registered face.");
-        }
-
         var matchingCandidateId =
             await FindMatchingCandidateIdAsync(
                 embedding);
 
-        if (matchingCandidateId != Guid.Empty)
+        if (matchingCandidateId != Guid.Empty && matchingCandidateId != request.CandidateId)
         {
             throw new InvalidOperationException(
                 "This face is already linked to another account.");
         }
 
-        var faceEmbedding = new ResumeAnalysis.Api.Entities.FaceEmbedding
+        var existingRegistration =
+            await _context.FaceEmbeddings
+                .FirstOrDefaultAsync(f =>
+                    f.CandidateId == request.CandidateId);
+
+        if (existingRegistration != null)
         {
-            CandidateId = request.CandidateId,
-            Embedding = JsonSerializer.Serialize(embedding)
-        };
+            existingRegistration.Embedding = JsonSerializer.Serialize(embedding);
+            await _context.SaveChangesAsync();
+        }
+        else
+        {
+            var faceEmbedding = new ResumeAnalysis.Api.Entities.FaceEmbedding
+            {
+                CandidateId = request.CandidateId,
+                Embedding = JsonSerializer.Serialize(embedding)
+            };
 
-        _context.FaceEmbeddings.Add(faceEmbedding);
+            _context.FaceEmbeddings.Add(faceEmbedding);
+            await _context.SaveChangesAsync();
+        }
 
-        await _context.SaveChangesAsync();
-
-        await _pythonFaceService.AddEmbeddingToIndexAsync(
-            request.CandidateId,
-            embedding);
+        try
+        {
+            await _pythonFaceService.AddEmbeddingToIndexAsync(
+                request.CandidateId,
+                embedding);
+        }
+        catch
+        {
+            // If already in index or index needs refresh, handled by AnnIndexSyncHostedService
+        }
     }
 
     public async Task<Guid> LoginWithFaceAsync(

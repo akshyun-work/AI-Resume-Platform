@@ -346,8 +346,15 @@ public class ResumeService : IResumeService
         CancellationToken ct)
     {
         if (resumeId == Guid.Empty)
-            throw new ArgumentException(
-                "Invalid id.");
+            throw new ArgumentException("Invalid id.");
+
+        var totalResumesCount = await _db.Resumes
+            .CountAsync(x => x.CandidateId == candidateId, ct);
+
+        if (totalResumesCount <= 1)
+        {
+            throw new InvalidOperationException("You must keep at least one resume on your profile. To update your resume, upload a new version instead.");
+        }
 
         var r = await _db.Resumes
             .FirstOrDefaultAsync(
@@ -355,15 +362,59 @@ public class ResumeService : IResumeService
                 ct);
 
         if (r == null)
-            throw new KeyNotFoundException(
-                "Resume not found.");
+            throw new KeyNotFoundException("Resume not found.");
 
         if (r.CandidateId != candidateId)
-            throw new UnauthorizedAccessException(
-                "Access denied.");
+            throw new UnauthorizedAccessException("Access denied.");
 
         var wasLatest = r.IsLatest;
         var storagePath = r.StoragePath;
+
+        // Remove linked MatchResults for this resume
+        var matchResults = await _db.MatchResults
+            .Where(m => m.ResumeId == resumeId)
+            .ToListAsync(ct);
+        if (matchResults.Count > 0)
+        {
+            _db.MatchResults.RemoveRange(matchResults);
+        }
+
+        // Remove linked AtsAnalyses for this resume
+        var atsAnalyses = await _db.AtsAnalyses
+            .Where(a => a.ResumeId == resumeId)
+            .ToListAsync(ct);
+        if (atsAnalyses.Count > 0)
+        {
+            _db.AtsAnalyses.RemoveRange(atsAnalyses);
+        }
+
+        // Find remaining candidate resumes
+        var remainingResumes = await _db.Resumes
+            .Where(x => x.CandidateId == candidateId && x.Id != resumeId)
+            .OrderByDescending(x => x.VersionNumber)
+            .ToListAsync(ct);
+
+        var fallbackResume = remainingResumes.FirstOrDefault();
+
+        // Reassign any JobApplications using this resume to the fallback resume
+        if (fallbackResume != null)
+        {
+            var applications = await _db.Applications
+                .Where(a => a.ResumeId == resumeId)
+                .ToListAsync(ct);
+
+            foreach (var app in applications)
+            {
+                app.ResumeId = fallbackResume.Id;
+                app.UpdatedAt = DateTime.UtcNow;
+            }
+
+            if (wasLatest)
+            {
+                fallbackResume.IsLatest = true;
+                fallbackResume.UpdatedAt = DateTime.UtcNow;
+            }
+        }
 
         _db.Resumes.Remove(r);
 
@@ -371,46 +422,18 @@ public class ResumeService : IResumeService
 
         try
         {
-            await _storage.DeleteAsync(
-                storagePath,
-                ct);
+            await _storage.DeleteAsync(storagePath, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
-                ex,
-                "Failed to delete file {Path}",
-                storagePath);
+            _logger.LogWarning(ex, "Failed to delete file {Path}", storagePath);
         }
 
         _logger.LogInformation(
-            "Resume deleted {ResumeId} candidate {CandidateId}",
+            "Resume deleted {ResumeId} candidate {CandidateId}. New latest: {NewLatestId}",
             resumeId,
-            candidateId);
-
-        if (wasLatest)
-        {
-            var newLatest =
-                await _db.Resumes
-                    .Where(x =>
-                        x.CandidateId == candidateId)
-                    .OrderByDescending(
-                        x => x.VersionNumber)
-                    .FirstOrDefaultAsync(ct);
-
-            if (newLatest != null)
-            {
-                newLatest.IsLatest = true;
-                newLatest.UpdatedAt = DateTime.UtcNow;
-
-                await _db.SaveChangesAsync(ct);
-
-                _logger.LogInformation(
-                    "New latest resume {ResumeId} version {Version}",
-                    newLatest.Id,
-                    newLatest.VersionNumber);
-            }
-        }
+            candidateId,
+            fallbackResume?.Id);
     }
 
     public async Task<ResumeDto?> GetLatestAsync(

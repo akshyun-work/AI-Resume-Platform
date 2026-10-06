@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ResumeAnalysis.Api.DTOs.Jobs;
 
 public class JobDto
@@ -10,6 +12,7 @@ public class JobDto
     public string? EmploymentType { get; set; }
     public List<string>? RequiredSkills { get; set; }
     public List<string>? PreferredSkills { get; set; }
+    public JsonElement? Structured { get; set; }
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

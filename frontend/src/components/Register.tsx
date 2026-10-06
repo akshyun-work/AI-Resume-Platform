@@ -6,6 +6,8 @@ import {
     Phone,
     UserPlus,
     Loader2,
+    Eye,
+    EyeOff,
 } from 'lucide-react';
 
 import { apiRequest, saveAuth } from '../services/api';
@@ -24,6 +26,7 @@ export const Register: React.FC<RegisterProps> = ({
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -181,13 +184,22 @@ export const Register: React.FC<RegisterProps> = ({
                             <input
                                 required
                                 minLength={8}
-                                type="password"
+                                type={showPassword ? 'text' : 'password'}
                                 value={password}
                                 onChange={(e) =>
                                     setPassword(e.target.value)
                                 }
-                                className="w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none focus:border-indigo-500"
+                                className="w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-11 text-sm text-white outline-none focus:border-indigo-500"
                             />
+
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
                         </div>
                     </div>
                 </div>

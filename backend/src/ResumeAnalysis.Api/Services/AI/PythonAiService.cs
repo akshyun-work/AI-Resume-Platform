@@ -25,27 +25,34 @@ public class PythonAiService : IPythonAiService
 
     private string GetPythonExecutable()
     {
-        var configuredPath =
-            _configuration["AI:PythonExecutable"];
+        var configuredPath = _configuration["AI:PythonExecutable"];
 
-        if (string.IsNullOrWhiteSpace(configuredPath))
+        if (!string.IsNullOrWhiteSpace(configuredPath))
         {
-            throw new InvalidOperationException(
-                "AI:PythonExecutable is not configured.");
+            var p1 = Path.GetFullPath(configuredPath, Directory.GetCurrentDirectory());
+            if (File.Exists(p1)) return p1;
+
+            var p2 = Path.GetFullPath(configuredPath, AppContext.BaseDirectory);
+            if (File.Exists(p2)) return p2;
         }
 
-        var fullPath = Path.GetFullPath(
-            configuredPath,
-            Directory.GetCurrentDirectory());
-
-        if (!File.Exists(fullPath))
+        var searchRoots = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+        foreach (var root in searchRoots)
         {
-            throw new FileNotFoundException(
-                "Configured Python executable was not found.",
-                fullPath);
+            var dir = new DirectoryInfo(root);
+            while (dir != null)
+            {
+                var candidateWin = Path.Combine(dir.FullName, "ai", ".venv", "Scripts", "python.exe");
+                if (File.Exists(candidateWin)) return candidateWin;
+
+                var candidateUnix = Path.Combine(dir.FullName, "ai", ".venv", "bin", "python");
+                if (File.Exists(candidateUnix)) return candidateUnix;
+
+                dir = dir.Parent;
+            }
         }
 
-        return fullPath;
+        return "python";
     }
 
     // ============================================================
@@ -54,27 +61,32 @@ public class PythonAiService : IPythonAiService
 
     private string GetScriptPath()
     {
-        var configuredPath =
-            _configuration["AI:ScriptPath"];
+        var configuredPath = _configuration["AI:ScriptPath"];
 
-        if (string.IsNullOrWhiteSpace(configuredPath))
+        if (!string.IsNullOrWhiteSpace(configuredPath))
         {
-            throw new InvalidOperationException(
-                "AI:ScriptPath is not configured.");
+            var p1 = Path.GetFullPath(configuredPath, Directory.GetCurrentDirectory());
+            if (File.Exists(p1)) return p1;
+
+            var p2 = Path.GetFullPath(configuredPath, AppContext.BaseDirectory);
+            if (File.Exists(p2)) return p2;
         }
 
-        var fullPath = Path.GetFullPath(
-            configuredPath,
-            Directory.GetCurrentDirectory());
-
-        if (!File.Exists(fullPath))
+        var searchRoots = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+        foreach (var root in searchRoots)
         {
-            throw new FileNotFoundException(
-                "Python AI script was not found.",
-                fullPath);
+            var dir = new DirectoryInfo(root);
+            while (dir != null)
+            {
+                var candidate = Path.Combine(dir.FullName, "ai", "gemini_analyzer.py");
+                if (File.Exists(candidate)) return candidate;
+
+                dir = dir.Parent;
+            }
         }
 
-        return fullPath;
+        throw new FileNotFoundException(
+            "Python AI script was not found in 'ai/gemini_analyzer.py'.");
     }
 
     // ============================================================
@@ -213,6 +225,96 @@ public class PythonAiService : IPythonAiService
         {
             throw new InvalidOperationException(
                 "Python AI returned empty output.");
+        }
+
+        return output.Trim();
+    }
+
+    // ============================================================
+    // Job Description Structuring (Task A)
+    // ============================================================
+
+    public async Task<string> StructureJobAsync(
+        string rawJobDescription,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(rawJobDescription))
+        {
+            return "{}";
+        }
+
+        var pythonExecutable = GetPythonExecutable();
+        var scriptPath = GetScriptPath();
+        var workingDirectory = Path.GetDirectoryName(scriptPath)!;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = pythonExecutable,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(
+            """
+            import sys
+            import json
+            import contextlib
+
+            with contextlib.redirect_stdout(sys.stderr):
+                from job_structurer import run_structurer_api
+                raw_text = sys.stdin.read()
+                result = run_structurer_api(raw_text)
+
+            print(json.dumps(result, default=str))
+            """
+        );
+
+        using var process = new Process
+        {
+            StartInfo = psi
+        };
+
+        _logger.LogInformation(
+            "Starting Python job structurer using {PythonExecutable}",
+            pythonExecutable);
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException(
+                "Failed to start Python job structurer process.");
+        }
+
+        await process.StandardInput.WriteAsync(rawJobDescription);
+        await process.StandardInput.FlushAsync();
+        process.StandardInput.Close();
+
+        var outputTask = process.StandardOutput.ReadToEndAsync(ct);
+        var errorTask = process.StandardError.ReadToEndAsync(ct);
+
+        await process.WaitForExitAsync(ct);
+
+        var output = await outputTask;
+        var error = await errorTask;
+
+        if (process.ExitCode != 0)
+        {
+            _logger.LogError(
+                "Python job structurer failed. ExitCode={ExitCode}, Error={Error}",
+                process.ExitCode,
+                error);
+
+            throw new InvalidOperationException(
+                $"Python job structurer failed: {error}");
+        }
+
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return "{}";
         }
 
         return output.Trim();

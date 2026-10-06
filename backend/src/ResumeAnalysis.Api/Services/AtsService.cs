@@ -32,6 +32,60 @@ public class AtsService : IAtsService
             ? default
             : JsonSerializer.Deserialize<T>(json);
 
+    private static List<string>? SanitizeStringList(string? json)
+    {
+        var list = Deserialize<List<string>>(json);
+        if (list == null || list.Count == 0) return list;
+
+        var sanitized = new List<string>();
+        foreach (var item in list)
+        {
+            if (string.IsNullOrWhiteSpace(item)) continue;
+            var trimmed = item.Trim();
+            if (trimmed.StartsWith("{") && trimmed.EndsWith("}"))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(trimmed);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("factors", out var factors) && factors.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var f in factors.EnumerateArray())
+                        {
+                            var s = f.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) sanitized.Add(s);
+                        }
+                    }
+                    if (root.TryGetProperty("resume_weaknesses", out var weaknesses) && weaknesses.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var w in weaknesses.EnumerateArray())
+                        {
+                            if (w.ValueKind == JsonValueKind.String)
+                            {
+                                var s = w.GetString();
+                                if (!string.IsNullOrWhiteSpace(s)) sanitized.Add(s);
+                            }
+                            else if (w.ValueKind == JsonValueKind.Object && w.TryGetProperty("description", out var desc))
+                            {
+                                var s = desc.GetString();
+                                if (!string.IsNullOrWhiteSpace(s)) sanitized.Add(s);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore malformed JSON string
+                }
+            }
+            else
+            {
+                sanitized.Add(trimmed);
+            }
+        }
+        return sanitized;
+    }
+
     private static AtsAnalysisDto ToDto(AtsAnalysis e) => new()
     {
         Id = e.Id,
@@ -55,10 +109,10 @@ public class AtsService : IAtsService
             Deserialize<List<string>>(e.MissingSkillsJson),
 
         Issues =
-            Deserialize<List<string>>(e.IssuesJson),
+            SanitizeStringList(e.IssuesJson),
 
         Recommendations =
-            Deserialize<List<string>>(e.RecommendationsJson),
+            SanitizeStringList(e.RecommendationsJson),
 
         AnalyzedAt = e.AnalyzedAt
     };
@@ -177,9 +231,10 @@ public class AtsService : IAtsService
             }
 
             // --------------------------------------------------------
+            // --------------------------------------------------------
             // Additional ATS information
             //
-            // These are read only when Python provides them.
+            // Read from atsResult (standard) or root (fallback)
             // --------------------------------------------------------
 
             List<string>? keywordsIdentified = null;
@@ -188,81 +243,21 @@ public class AtsService : IAtsService
             List<string>? issues = null;
             List<string>? recommendations = null;
 
-            // --------------------------------------------------------
-            // Direct properties from the AI response
-            // --------------------------------------------------------
-
-            if (root.TryGetProperty(
-                    "keywords_identified",
-                    out var keywordsElement)
-                && keywordsElement.ValueKind == JsonValueKind.Array)
+            // Helper to get string array from element
+            static List<string>? GetStringList(JsonElement source, string propertyName)
             {
-                keywordsIdentified =
-                    JsonSerializer.Deserialize<List<string>>(
-                        keywordsElement.GetRawText());
-            }
-
-            if (root.TryGetProperty(
-                    "missing_keywords",
-                    out var missingKeywordsElement)
-                && missingKeywordsElement.ValueKind == JsonValueKind.Array)
-            {
-                missingKeywords =
-                    JsonSerializer.Deserialize<List<string>>(
-                        missingKeywordsElement.GetRawText());
-            }
-
-            if (root.TryGetProperty(
-                    "missing_skills",
-                    out var missingSkillsElement)
-                && missingSkillsElement.ValueKind == JsonValueKind.Array)
-            {
-                missingSkills =
-                    JsonSerializer.Deserialize<List<string>>(
-                        missingSkillsElement.GetRawText());
-            }
-
-            if (root.TryGetProperty(
-                    "issues",
-                    out var issuesElement)
-                && issuesElement.ValueKind == JsonValueKind.Array)
-            {
-                issues =
-                    JsonSerializer.Deserialize<List<string>>(
-                        issuesElement.GetRawText());
-            }
-
-            if (root.TryGetProperty(
-                    "recommendations",
-                    out var recommendationsElement)
-                && recommendationsElement.ValueKind == JsonValueKind.Array)
-            {
-                recommendations =
-                    JsonSerializer.Deserialize<List<string>>(
-                        recommendationsElement.GetRawText());
-            }
-
-            // --------------------------------------------------------
-            // Gemini analysis
-            //
-            // If the Python service returns gemini_analysis as a
-            // string, store it as an issue/reason for the ATS result.
-            // --------------------------------------------------------
-
-            if (root.TryGetProperty(
-                    "gemini_analysis",
-                    out var geminiAnalysisElement)
-                && geminiAnalysisElement.ValueKind == JsonValueKind.String)
-            {
-                var geminiAnalysis =
-                    geminiAnalysisElement.GetString();
-
-                if (!string.IsNullOrWhiteSpace(geminiAnalysis))
+                if (source.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.Array)
                 {
-                    issues ??= new List<string>();
-                    issues.Add(geminiAnalysis);
+                    return JsonSerializer.Deserialize<List<string>>(element.GetRawText());
                 }
+                return null;
             }
+
+            keywordsIdentified = GetStringList(atsResult, "keywords_identified") ?? GetStringList(root, "keywords_identified");
+            missingKeywords = GetStringList(atsResult, "missing_keywords") ?? GetStringList(root, "missing_keywords");
+            missingSkills = GetStringList(atsResult, "missing_skills") ?? GetStringList(root, "missing_skills");
+            issues = GetStringList(atsResult, "issues") ?? GetStringList(root, "issues");
+            recommendations = GetStringList(atsResult, "recommendations") ?? GetStringList(root, "recommendations");
 
             // --------------------------------------------------------
             // Fallback: support comparison structure

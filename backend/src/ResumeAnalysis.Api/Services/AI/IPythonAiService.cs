@@ -8,6 +8,10 @@ public interface IPythonAiService
         object? jobData,
         CancellationToken ct);
 
+    Task<string> StructureJobAsync(
+        string rawJobDescription,
+        CancellationToken ct);
+
     Task<string> ChatAsync(
         string pdfPath,
         string message,

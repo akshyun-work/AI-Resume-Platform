@@ -209,32 +209,146 @@ def build_candidate_context(
     }
 
 
+def generate_fallback_match_analysis(context):
+    """
+    Generate deterministic structured JSON fallback containing all 6 Why This Match subcategories.
+    """
+    job_match = context.get("job_match", {})
+    candidate_name = context.get("candidate", {}).get("name", "Candidate")
+    job = context.get("job") or {}
+    job_title = job.get("title", "this position")
+    matched_req = job_match.get("matched_required", []) or []
+    matched_pref = job_match.get("matched_preferred", []) or []
+    matched_job = job_match.get("matched_job_skills", []) or []
+    missing_req = job_match.get("missing_required", []) or []
+    missing_pref = job_match.get("missing_preferred", []) or []
+    missing_job = job_match.get("missing_job_skills", []) or []
+    score = job_match.get("score", 0)
+
+    # 1. Resume Strengths
+    resume_strengths = []
+    if matched_req:
+        resume_strengths.append({
+            "title": "Strong Technical Foundation",
+            "description": f"You possess core required skills including {', '.join(str(s) for s in matched_req)}."
+        })
+    if matched_pref or matched_job:
+        resume_strengths.append({
+            "title": "Relevant Project & Domain Skills",
+            "description": f"Your profile demonstrates verified experience in {', '.join(str(s) for s in (matched_pref + matched_job)[:4])}."
+        })
+    if not resume_strengths:
+        resume_strengths.append({
+            "title": "Transferable Background",
+            "description": "Demonstrates transferable engineering background and analytical foundations."
+        })
+
+    # 2. Resume Weaknesses
+    resume_weaknesses = []
+    if missing_req:
+        resume_weaknesses.append({
+            "title": "Missing Core Required Competencies",
+            "description": f"Your resume lacks explicit mention of {', '.join(str(s) for s in missing_req)}—critical for this position."
+        })
+    if missing_pref:
+        resume_weaknesses.append({
+            "title": "Lack of Preferred Tools & Architecture Exposure",
+            "description": f"Currently missing preferred experience in {', '.join(str(s) for s in missing_pref)}."
+        })
+    if missing_job:
+        resume_weaknesses.append({
+            "title": "Job-Specific Skill Gaps",
+            "description": f"No direct evidence for job-specific expectations: {', '.join(str(s) for s in missing_job)}."
+        })
+    if not resume_weaknesses:
+        resume_weaknesses.append({
+            "title": "Minor Content Optimization",
+            "description": "No major technical weaknesses detected for this role."
+        })
+
+    # 3. Explanation of Job Match
+    factors = []
+    if missing_req:
+        factors.append(f"Impacted by absence of required skills: {', '.join(str(s) for s in missing_req[:3])}")
+    if missing_pref:
+        factors.append(f"Missing preferred skills: {', '.join(str(s) for s in missing_pref[:3])}")
+    if not factors:
+        factors.append("Candidate strongly satisfies the role criteria.")
+
+    summary = f"{candidate_name} matches {score}% of the core criteria for {job_title}."
+    analysis_text = f"You meet key required areas ({', '.join(str(s) for s in (matched_req or ['foundational areas']))}). The score of {score}/100 is adjusted based on missing required & preferred items."
+
+    # 5. Improvement Actions
+    improvement_actions = []
+    all_missing = missing_req + missing_pref + missing_job
+    for i, skill in enumerate(all_missing[:3], 1):
+        improvement_actions.append({
+            "title": f"Develop and Document {skill}",
+            "action": f"Build or highlight a project specifically implementing and testing {skill}, then explicitly list it on your resume."
+        })
+    if not improvement_actions:
+        improvement_actions.append({
+            "title": "Quantify Resume Impact",
+            "action": "Add quantifiable metrics and leadership outcomes to your existing project descriptions."
+        })
+
+    # 6. Career Direction
+    career_recs = context.get("career_recommendations", [])
+    alt_role = career_recs[0]["role"] if career_recs else "Specialized Engineering"
+    career_direction = {
+        "immediate_target": f"{job_title} (requires bridging the gap in {', '.join(str(s) for s in all_missing[:2]) if all_missing else 'specialized workflows'}).",
+        "stronger_alignment": f"Your current skill set also shows high alignment for {alt_role} roles given your existing projects and strengths."
+    }
+
+    return {
+        "resume_strengths": resume_strengths,
+        "resume_weaknesses": resume_weaknesses,
+        "explanation_of_job_match": {
+            "score": score,
+            "summary": summary,
+            "analysis": analysis_text,
+            "factors": factors
+        },
+        "most_important_missing_skills": {
+            "required": missing_req,
+            "preferred": missing_pref,
+            "job_specific": missing_job
+        },
+        "prioritized_improvement_actions": improvement_actions,
+        "career_direction": career_direction,
+
+        # Backward compatibility aliases
+        "match_summary": summary,
+        "why_you_match": [s.get("description", str(s)) if isinstance(s, dict) else str(s) for s in resume_strengths],
+        "what_is_missing": {
+            "required": missing_req,
+            "preferred": missing_pref,
+            "job_specific": missing_job
+        },
+        "score_explanation": {
+            "score": score,
+            "explanation": analysis_text,
+            "factors": factors
+        },
+        "improvement_actions": [f"{a['title']}: {a['action']}" if isinstance(a, dict) else str(a) for a in improvement_actions]
+    }
+
+
 def build_prompt(context):
     """
-    Build a structured prompt for the job-match explanation.
+    Build a structured prompt for the 6-part "Why This Match" career evaluation.
     """
+    context_str = json.dumps(context, indent=2, default=str)
 
     return f"""
-You are an AI career advisor inside a resume analysis platform.
+You are an expert AI career advisor and hiring evaluator inside a resume intelligence platform.
 
 Analyze ONLY the candidate and job information provided below.
 
-The Python system has already calculated:
-- the job match score
-- matched required skills
-- missing required skills
-- matched preferred skills
-- missing preferred skills
-- matched job-specific skills
-- missing job-specific skills
+Candidate and calculated match data:
+{context_str}
 
-DO NOT change, recalculate, or invent these values.
-
-Candidate analysis data:
-
-{context}
-
-Your task is ONLY to generate the "Why This Match" explanation.
+Your task is to generate the comprehensive 6-part "Why This Match" assessment.
 
 Return ONLY valid JSON.
 Do not use Markdown.
@@ -244,61 +358,71 @@ Do not add any text before or after the JSON.
 Use EXACTLY this structure:
 
 {{
-  "match_summary": "A concise explanation of how well the candidate matches this role.",
-
-  "why_you_match": [
-    "skill or capability the candidate already has"
+  "resume_strengths": [
+    {{
+      "title": "Strength Category/Title (e.g., Strong Technical Foundation)",
+      "description": "Specific explanation grounded in the candidate's matched skills and projects."
+    }}
   ],
 
-  "what_is_missing": {{
+  "resume_weaknesses": [
+    {{
+      "title": "Weakness Category/Title (e.g., Missing Core Backend Competencies)",
+      "description": "Specific explanation of what skills or principles are missing for this role."
+    }}
+  ],
+
+  "explanation_of_job_match": {{
+    "score": 0,
+    "summary": "Concise summary of candidate suitability for this position.",
+    "analysis": "Detailed explanation of why the calculated score is at this level based on required vs preferred skills.",
+    "factors": [
+      "Key factor affecting the score"
+    ]
+  }},
+
+  "most_important_missing_skills": {{
     "required": [
-      "missing required skill"
+      "Missing required skill"
     ],
     "preferred": [
-      "missing preferred skill"
+      "Missing preferred skill"
     ],
     "job_specific": [
-      "missing job-specific skill"
+      "Missing job-specific skill"
     ]
   }},
 
-  "score_explanation": {{
-    "score": 0,
-    "explanation": "A concise explanation of why the calculated score is at this level.",
-    "factors": [
-      "factor affecting the score"
-    ]
-  }},
+  "prioritized_improvement_actions": [
+    {{
+      "title": "Action Title (e.g., Develop and Document REST APIs)",
+      "action": "Practical, step-by-step guidance on what to build or update on the resume."
+    }}
+  ],
 
-  "improvement_actions": [
-    "First prioritized improvement action",
-    "Second prioritized improvement action",
-    "Third prioritized improvement action"
-  ]
+  "career_direction": {{
+    "immediate_target": "Target role and what is needed to qualify.",
+    "stronger_alignment": "Alternative or adjacent role where candidate profile has highest potential given their background."
+  }}
 }}
 
 Rules:
-
-1. "why_you_match" must contain ONLY skills/capabilities that are present in the provided matched data.
-2. "what_is_missing.required" must contain ONLY missing_required skills.
-3. "what_is_missing.preferred" must contain ONLY missing_preferred skills.
-4. "what_is_missing.job_specific" must contain ONLY missing_job_skills.
-5. Do not move a skill from one category to another.
-6. "score" must exactly equal the Python-calculated job match score.
-7. "factors" must explain the actual missing skills or other provided factors affecting the score.
-8. Do not claim the candidate has a missing skill.
-9. Do not invent AWS, Microservices, CI/CD, OOP, REST APIs, or any other skill unless it exists in the supplied job analysis.
-10. "improvement_actions" should contain at most 3 practical actions based on the missing skills.
-11. If a category has no missing skills, return an empty array.
-12. Keep the explanation concise and professional.
+1. "resume_strengths" must reference verified matched skills/projects from the provided data.
+2. "resume_weaknesses" must accurately describe missing requirements without hallucinating unrelated technologies.
+3. "explanation_of_job_match.score" must exactly equal the Python-calculated job match score.
+4. "most_important_missing_skills" must categorize ONLY the supplied missing skills.
+5. "prioritized_improvement_actions" must contain 2-3 concrete, actionable recommendations.
+6. "career_direction" must advise on the immediate target and any higher-potential career pathways based on their projects/experience.
+7. Keep tone professional, constructive, and empowering.
 """
 
 
 def analyze_with_gemini(context):
     """
     Send the structured analysis to Gemini and return
-    validated JSON as a string.
+    validated JSON object or fallback structure.
     """
+    fallback = generate_fallback_match_analysis(context)
 
     try:
         client = create_gemini_client()
@@ -307,13 +431,14 @@ def analyze_with_gemini(context):
 
         response = client.models.generate_content(
             model="gemini-3.1-flash-lite",
-            contents=prompt
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json"
+            }
         )
 
         if not response.text:
-            raise RuntimeError(
-                "Gemini returned an empty response."
-            )
+            return fallback
 
         raw_text = response.text.strip()
 
@@ -329,27 +454,22 @@ def analyze_with_gemini(context):
 
         raw_text = raw_text.strip()
 
-        # Validate that Gemini actually returned JSON.
         parsed = json.loads(raw_text)
+        if isinstance(parsed, dict) and any(k in parsed for k in ("resume_strengths", "explanation_of_job_match", "match_summary", "career_direction")):
+            if "match_summary" not in parsed and isinstance(parsed.get("explanation_of_job_match"), dict):
+                parsed["match_summary"] = parsed["explanation_of_job_match"].get("summary", "")
+            if "why_you_match" not in parsed and isinstance(parsed.get("resume_strengths"), list):
+                parsed["why_you_match"] = [
+                    s.get("description", str(s)) if isinstance(s, dict) else str(s)
+                    for s in parsed["resume_strengths"]
+                ]
+            return parsed
 
-        # Return normalized JSON so ASP.NET receives predictable data.
-        return json.dumps(
-            parsed,
-            ensure_ascii=False
-        )
-
-    except json.JSONDecodeError as error:
-        raise RuntimeError(
-        f"Gemini returned invalid JSON: {error}"
-        ) from error
-
-    except ValueError:
-        raise
+        return fallback
 
     except Exception as error:
-        raise RuntimeError(
-        f"Gemini analysis failed: {error}"
-    ) from error
+        # Gracefully fall back to deterministic structured response
+        return fallback
 
 def print_gemini_analysis(
     resume,
